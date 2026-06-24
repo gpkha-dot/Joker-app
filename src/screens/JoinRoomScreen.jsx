@@ -38,39 +38,44 @@ export default function JoinRoomScreen() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', padding: 24, maxWidth: 400, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 48 }}>
-        <button onClick={() => navigate('/')} style={{ background: 'none', color: 'var(--text-secondary)', fontSize: 15, padding: 0, fontFamily: 'Outfit, sans-serif' }}>
+    <div style={{ minHeight: '100vh', padding: 24, maxWidth: 400, margin: '0 auto', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      {/* Top bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
+        <button
+          onClick={() => navigate('/')}
+          style={{ background: 'none', color: 'var(--text-secondary)', fontSize: 15, padding: '8px 0', fontFamily: 'Outfit, sans-serif', display: 'flex', alignItems: 'center', gap: 6 }}
+        >
           ← {t('back')}
         </button>
         <LanguageToggle />
       </div>
 
-      <h1 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 28, marginBottom: 32 }}>
+      <h1 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 28, marginBottom: 28, color: 'var(--text-primary)' }}>
         {t('join_room')}
       </h1>
 
       {/* Name input */}
-      <div style={{ marginBottom: 32 }}>
+      <div style={{ marginBottom: 28 }}>
         <input
           placeholder={t('enter_name')}
           value={name}
           onChange={e => setName(e.target.value)}
           autoComplete="off"
-          style={{ fontSize: 18 }}
+          style={{ fontSize: 17 }}
         />
       </div>
 
       {/* Code display */}
       <div style={{
         background: 'var(--surface)', borderRadius: 'var(--radius-card)',
-        padding: '24px', marginBottom: 24, textAlign: 'center',
+        padding: '24px 20px', marginBottom: 20, textAlign: 'center',
+        border: '1px solid var(--border)',
       }}>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>{t('enter_code')}</p>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14, fontFamily: 'Outfit, sans-serif' }}>{t('enter_code')}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
           {[0,1,2,3].map(i => (
             <div key={i} style={{
-              width: 56, height: 64, background: 'var(--surface-light)',
+              width: 58, height: 68, background: 'var(--surface-light)',
               borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 32, fontFamily: 'Outfit, sans-serif', fontWeight: 700,
               color: code[i] ? 'var(--blue)' : 'var(--text-secondary)',
@@ -85,18 +90,17 @@ export default function JoinRoomScreen() {
       </div>
 
       {/* Number pad */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 20 }}>
         {PAD.map(k => {
           const isConfirm = k === '✓'
-          const isBack = k === '←'
           return (
             <button
               key={k}
               onClick={() => handlePad(k)}
               style={{
-                height: 56, background: isConfirm ? 'var(--blue)' : 'var(--surface-light)',
+                height: 54, background: isConfirm ? 'var(--blue)' : 'var(--surface)',
                 color: 'var(--text-primary)', borderRadius: 'var(--radius-btn)',
-                fontSize: isConfirm ? 22 : 24, fontFamily: isBack ? 'inherit' : 'Inter, sans-serif',
+                fontSize: isConfirm ? 22 : 22, fontFamily: 'Inter, sans-serif',
                 fontWeight: 500, border: '1px solid var(--border)',
                 fontVariantNumeric: 'tabular-nums',
               }}

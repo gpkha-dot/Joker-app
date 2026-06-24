@@ -80,5 +80,16 @@
   "error_name_required": "Name is required",
   "enter_name": "Your name",
   "enter_code": "Room code",
-  "join": "Join"
+  "join": "Join",
+
+  "leave_game_title": "Leave Game?",
+  "leave_game_message": "Your game progress will be lost.",
+  "cancel_room_title": "Cancel Room?",
+  "cancel_room_message": "All players will be disconnected.",
+  "leave_waiting_title": "Leave Room?",
+  "leave_waiting_message": "You will be removed from this room.",
+  "cancel_btn": "Cancel",
+  "leave_game_btn": "Leave Game",
+  "cancel_room_btn": "Cancel Room",
+  "leave_room_btn": "Leave Room"
 }

@@ -13,43 +13,45 @@ export default function HomeScreen() {
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: 24,
+      padding: 32,
       position: 'relative',
+      background: 'var(--bg)',
     }}>
       <div style={{ position: 'absolute', top: 24, right: 24 }}>
         <LanguageToggle />
       </div>
 
-      <div style={{ textAlign: 'center', marginBottom: 64 }}>
+      <div style={{ textAlign: 'center', marginBottom: 72 }}>
         <h1 style={{
           fontFamily: 'Outfit, sans-serif',
           fontWeight: 700,
-          fontSize: 'clamp(56px, 12vw, 96px)',
+          fontSize: 'clamp(64px, 14vw, 108px)',
           color: 'var(--blue)',
           lineHeight: 1,
-          letterSpacing: '-2px',
+          letterSpacing: '-3px',
         }}>
           Joker
         </h1>
         <p style={{
-          fontFamily: 'BPG Nino Mtavruli, sans-serif',
-          fontSize: 'clamp(28px, 6vw, 48px)',
+          fontFamily: 'BPG Nino Mtavruli, Sylfaen, Georgia, serif',
+          fontSize: 'clamp(30px, 6vw, 52px)',
           color: 'var(--blue)',
-          marginTop: 8,
-          opacity: 0.85,
+          marginTop: 10,
+          opacity: 0.8,
+          letterSpacing: '2px',
         }}>
           ჯოკერი
         </p>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 320 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 340 }}>
         <button
           onClick={() => navigate('/create')}
           style={{
             background: 'var(--blue)',
             color: '#fff',
             borderRadius: 'var(--radius-btn)',
-            height: 56,
+            height: 58,
             fontSize: 18,
             fontFamily: 'Outfit, sans-serif',
             fontWeight: 700,
@@ -65,7 +67,7 @@ export default function HomeScreen() {
             background: 'transparent',
             color: 'var(--text-primary)',
             borderRadius: 'var(--radius-btn)',
-            height: 56,
+            height: 58,
             fontSize: 18,
             fontFamily: 'Outfit, sans-serif',
             fontWeight: 700,

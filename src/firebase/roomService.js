@@ -71,3 +71,11 @@ export async function updatePlayerNames(code, names) {
   names.forEach((name, i) => { updates[`players/p${i + 1}/name`] = name })
   await update(ref(db, `rooms/${code}`), updates)
 }
+
+export async function cancelRoom(code) {
+  await set(ref(db, `rooms/${code}`), null)
+}
+
+export async function leaveRoom(code, slot) {
+  await set(ref(db, `rooms/${code}/players/${slot}`), null)
+}

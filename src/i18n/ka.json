@@ -80,5 +80,16 @@
   "error_name_required": "სახელი სავალდებულოა",
   "enter_name": "თქვენი სახელი",
   "enter_code": "ოთახის კოდი",
-  "join": "შეერთება"
+  "join": "შეერთება",
+
+  "leave_game_title": "გასვლა?",
+  "leave_game_message": "თამაშის პროგრესი დაიკარგება.",
+  "cancel_room_title": "ოთახის გაუქმება?",
+  "cancel_room_message": "ყველა მოთამაშე გაითიშება.",
+  "leave_waiting_title": "ოთახის დატოვება?",
+  "leave_waiting_message": "თქვენ გამოვიდეთ ამ ოთახიდან.",
+  "cancel_btn": "გაუქმება",
+  "leave_game_btn": "გასვლა",
+  "cancel_room_btn": "ოთახის გაუქმება",
+  "leave_room_btn": "გასვლა"
 }

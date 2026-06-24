@@ -14,14 +14,15 @@ export function buildHandSequence(gameMode) {
 
 export function getSetBoundaries(gameMode) {
   if (gameMode === 'classic') {
-    // 4 sets: [0-5] 1-8 skip 9, actually split by game design:
-    // Set 1: hands 0-5 (1,2,3,4,5,6), Set 2: hands 6-11 (7,8,9,9,9,9)
-    // Set 3: hands 12-17 (8,7,6,5,4,3), Set 4: hands 18-23 (2,1,9,9,9,9)
+    // Set 1: hands 0-7  (cards 1-8, 8 hands)
+    // Set 2: hands 8-11 (cards 9×4, 4 hands)
+    // Set 3: hands 12-19 (cards 8-1, 8 hands)
+    // Set 4: hands 20-23 (cards 9×4, 4 hands)
     return [
-      { start: 0, end: 5 },
-      { start: 6, end: 11 },
-      { start: 12, end: 17 },
-      { start: 18, end: 23 },
+      { start: 0, end: 7 },
+      { start: 8, end: 11 },
+      { start: 12, end: 19 },
+      { start: 20, end: 23 },
     ]
   }
   // 9cards: 4 sets of 4
