@@ -1,12 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700&family=Inter:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=BPG+Nino+Mtavruli&display=swap');
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-body {
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #0f0f0f;
-  color: #fff;
-  min-height: 100vh;
+:root {
+  --blue: #2563EB;
+  --blue-light: #EBF5FF;
+  --blue-mid: #DBEAFE;
+  --blue-dark: #1D4ED8;
+  --orange: #D4500A;
+  --orange-light: #FEF3E2;
+  --orange-mid: #FFF0E6;
+  --orange-dark: #C2410C;
+  --bg: #1E1E2E;
+  --surface: #2A2A3E;
+  --surface-light: #32324A;
+  --text-primary: #F0F0F5;
+  --text-secondary: #9090A8;
+  --border: rgba(255,255,255,0.08);
+  --radius-card: 16px;
+  --radius-btn: 12px;
+  --radius-badge: 8px;
+  --transition: 150ms ease;
 }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-heading { font-family: 'Outfit', sans-serif; }
+.font-geo { font-family: 'BPG Nino Mtavruli', sans-serif; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+button {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: opacity var(--transition), transform var(--transition);
+}
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+input {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  background: var(--surface-light);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  color: var(--text-primary);
+  height: 48px;
+  padding: 0 16px;
+  width: 100%;
+  outline: none;
+  transition: border-color var(--transition);
+}
+input:focus { border-color: var(--blue); }
+input::placeholder { color: var(--text-secondary); }
+
+.page-fade-enter { opacity: 0; transform: translateY(8px); }
+.page-fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 150ms ease, transform 150ms ease; }
+.page-fade-exit { opacity: 1; }
+.page-fade-exit-active { opacity: 0; transition: opacity 150ms ease; }
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
