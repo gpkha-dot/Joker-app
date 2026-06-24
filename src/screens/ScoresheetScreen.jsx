@@ -34,6 +34,7 @@ export default function ScoresheetScreen() {
   const [inputVal, setInputVal] = useState('')
   const [forbiddenWarn, setForbiddenWarn] = useState(false)
   const [autoFillErr, setAutoFillErr] = useState(null)   // null | hand-index
+  const [exceedsErr, setExceedsErr] = useState(null)     // null | hand-index
   const [setBonus, setSetBonus] = useState(null)
   const [lastCompletedSet, setLastCompletedSet] = useState(-1)
   const [showLeaveModal, setShowLeaveModal] = useState(false)
@@ -80,10 +81,25 @@ export default function ScoresheetScreen() {
     [hands, handSeq, histType, histValue, histValueShort, histValueLong]
   )
 
-  // Running totals — sum of raw points (no division)
+  // Premium/penalty adjustments per completed set
+  const setBonusData = useMemo(() =>
+    setBounds.map(b => {
+      const handsInSet = Array.from({ length: b.end - b.start + 1 }, (_, i) => hands[b.start + i] ?? {})
+      const complete = handsInSet.every(h => PLAYER_KEYS.every(pk => h?.bids?.[pk] != null && h?.results?.[pk] != null))
+      if (!complete) return null
+      return calcSetBonus(handsInSet, 4, playerMode)
+    }),
+    [hands, setBounds, playerMode]
+  )
+
+  // Running totals — raw hand points plus Premium bonus/penalty adjustments
   const grandTotals = useMemo(() =>
-    PLAYER_KEYS.map((_, pi) => handPoints.reduce((s, row) => s + (row[pi] ?? 0), 0)),
-    [handPoints]
+    PLAYER_KEYS.map((_, pi) => {
+      const raw = handPoints.reduce((s, row) => s + (row[pi] ?? 0), 0)
+      const adj = setBonusData.reduce((s, bd) => bd ? s + (bd.bonuses[pi] ?? 0) - (bd.penalties[pi] ?? 0) : s, 0)
+      return raw + adj
+    }),
+    [handPoints, setBonusData]
   )
 
   // Focus hidden input on desktop whenever active cell changes
@@ -158,6 +174,12 @@ export default function ScoresheetScreen() {
       }
       await updateHand(code, hi, { [`bids/${pk}`]: num })
     } else {
+      // Reject if adding this result would push the hand total above cards in play
+      const existingSum = PLAYER_KEYS.reduce((s, k, i) => i !== pi ? s + (h?.results?.[k] ?? 0) : s, 0)
+      if (existingSum + num > cards) {
+        setExceedsErr(hi)
+        return
+      }
       const { ht, hv } = resolveHist(cards)
       const bid = h?.bids?.[pk] ?? 0
       const pts = calcPoints(bid, num, cards, ht, hv)
@@ -182,6 +204,7 @@ export default function ScoresheetScreen() {
           // 4th result auto-filled — jump straight to next hand
           setInputVal('')
           setForbiddenWarn(false)
+          setExceedsErr(null)
           const nextHi = hi + 1
           if (nextHi < handSeq.length) {
             setActiveCell({ hand: nextHi, type: 'bid', player: 0 })
@@ -200,21 +223,18 @@ export default function ScoresheetScreen() {
     advanceCell(hi, type, pi)
     setInputVal('')
     setForbiddenWarn(false)
+    setExceedsErr(null)
   }, [activeCell, inputVal, hands, handSeq, histType, histValue, histValueShort, histValueLong, code, advanceCell])
 
-  // Digit appender with smart-replace — clears any previous error on new input
+  // Single-digit entry — always replaces (max cards = 9 so one digit is always enough)
   const appendDigit = useCallback((digit) => {
     if (!activeCell) return
     setAutoFillErr(null)
+    setExceedsErr(null)
     const maxAllowed = handSeq[activeCell.hand]
-    const multiN = parseInt(inputVal + digit)
-    const singleN = parseInt(digit)
-    let nextVal = null
-    if (!isNaN(multiN) && multiN <= maxAllowed) nextVal = inputVal + digit
-    else if (!isNaN(singleN) && singleN <= maxAllowed) nextVal = digit
-    if (nextVal === null) return
-    setInputVal(nextVal)
-    const n = parseInt(nextVal)
+    const n = parseInt(digit)
+    if (isNaN(n) || n > maxAllowed) return
+    setInputVal(digit)
     if (activeCell.type === 'bid') {
       const h = hands[activeCell.hand] ?? {}
       const allBids = PLAYER_KEYS.map((pk, i) => i === activeCell.player ? n : (h?.bids?.[pk] ?? null))
@@ -222,7 +242,7 @@ export default function ScoresheetScreen() {
     } else {
       setForbiddenWarn(false)
     }
-  }, [activeCell, inputVal, handSeq, hands])
+  }, [activeCell, handSeq, hands])
 
   const handleHiddenKeyDown = useCallback((e) => {
     if (!activeCell) return
@@ -231,18 +251,19 @@ export default function ScoresheetScreen() {
       e.preventDefault()
       setInputVal(v => v.slice(0, -1))
       setForbiddenWarn(false)
+      setExceedsErr(null)
       return
     }
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); confirmCell(); return }
     if (e.key === 'Escape') {
       e.preventDefault()
-      setActiveCell(null); setInputVal(''); setForbiddenWarn(false); setAutoFillErr(null)
+      setActiveCell(null); setInputVal(''); setForbiddenWarn(false); setAutoFillErr(null); setExceedsErr(null)
     }
   }, [activeCell, appendDigit, confirmCell])
 
   const handleKey = useCallback((k) => {
     if (!activeCell) return
-    if (k === '←') { setInputVal(v => v.slice(0, -1)); setForbiddenWarn(false); return }
+    if (k === '←') { setInputVal(v => v.slice(0, -1)); setForbiddenWarn(false); setExceedsErr(null); return }
     if (k === '✓') { confirmCell(); return }
     appendDigit(k)
   }, [activeCell, appendDigit, confirmCell])
@@ -258,6 +279,7 @@ export default function ScoresheetScreen() {
     setInputVal(existing != null ? String(existing) : '')
     setForbiddenWarn(false)
     setAutoFillErr(null)
+    setExceedsErr(null)
     if (!mobile) hiddenInputRef.current?.focus()
   }, [canEdit, inputMode, mySlot, hands, mobile])
 
@@ -341,8 +363,11 @@ export default function ScoresheetScreen() {
       <tbody>
         {handSeq.map((cards, hi) => {
           const setIdx = getSetForHand(hi, gameMode)
-          const isSetStart = setBounds[setIdx]?.start === hi
-          const isSetEnd = setBounds[setIdx]?.end === hi
+          const b = setBounds[setIdx]
+          const isSetStart = b?.start === hi
+          const isSetEnd = b?.end === hi
+          const bonusData = setBonusData[setIdx]
+          const handIdxInSet = hi - (b?.start ?? 0)
           const isEven = hi % 2 === 0
           const h = hands[hi] ?? {}
           const isBidRowActive = activeCell?.hand === hi && activeCell?.type === 'bid'
@@ -381,12 +406,18 @@ export default function ScoresheetScreen() {
                   const bidForbidden = isBidActive && forbiddenWarn
 
                   const bidDisplay = isBidActive
-                    ? (inputVal !== '' ? inputVal : (bid != null ? String(bid) : '·'))
-                    : (bid != null ? String(bid) : '')
+                    ? (inputVal !== '' ? inputVal : (bid != null ? (bid === 0 ? '-' : String(bid)) : '·'))
+                    : (bid != null ? (bid === 0 ? '-' : String(bid)) : '')
 
                   const ptsDisplay = isResActive
                     ? (inputVal !== '' ? inputVal : (pts != null ? String(pts) : '·'))
                     : (pts != null ? String(pts) : '')
+
+                  const cellMark = !isResActive && pts != null && bonusData ? (
+                    bonusData.perfect.includes(pi) && bonusData.highestHandIdxs?.[pi] === handIdxInSet ? 'bonus' :
+                    !bonusData.perfect.includes(pi) && bonusData.penalties[pi] > 0 && bonusData.highestHandIdxs?.[pi] === handIdxInSet ? 'penalty' :
+                    null
+                  ) : null
 
                   return (
                     <td key={pk} style={{ borderLeft: '1px solid var(--border)', padding: 0 }}>
@@ -417,7 +448,7 @@ export default function ScoresheetScreen() {
                           {bidDisplay}
                         </div>
 
-                        {/* Points sub-cell — italic + muted when auto-filled */}
+                        {/* Points sub-cell — italic + muted when auto-filled; x2/strikethrough for Premium */}
                         <div
                           onClick={() => handleCellTap(hi, 'result', pi)}
                           style={{
@@ -426,8 +457,9 @@ export default function ScoresheetScreen() {
                             fontSize: mobile ? 12 : 14,
                             fontWeight: pts != null || isResActive ? 600 : 400,
                             fontStyle: isAutoFilled && !isResActive ? 'italic' : 'normal',
-                            opacity: isAutoFilled && !isResActive ? 0.6 : 1,
-                            color: isResActive ? 'var(--text-primary)' : ptColor(bid, result, pts),
+                            opacity: cellMark === 'penalty' ? 0.55 : (isAutoFilled && !isResActive ? 0.6 : 1),
+                            color: isResActive ? 'var(--text-primary)' : (cellMark === 'penalty' ? 'var(--text-secondary)' : ptColor(bid, result, pts)),
+                            textDecoration: cellMark === 'penalty' ? 'line-through' : 'none',
                             cursor: bid != null && canEdit ? 'pointer' : 'default',
                             background: isResActive ? 'rgba(37,99,235,0.13)' : 'transparent',
                             boxShadow: isResActive ? 'inset 0 0 0 2px var(--blue)' : 'none',
@@ -437,7 +469,16 @@ export default function ScoresheetScreen() {
                             userSelect: 'none', WebkitUserSelect: 'none',
                           }}
                         >
-                          {ptsDisplay}
+                          {cellMark === 'bonus' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                              <span>{ptsDisplay}</span>
+                              <span style={{
+                                fontSize: 8, fontWeight: 800, color: '#10b981',
+                                background: 'rgba(16,185,129,0.18)', borderRadius: 3,
+                                padding: '1px 3px', lineHeight: 1.2,
+                              }}>×2</span>
+                            </div>
+                          ) : ptsDisplay}
                         </div>
                       </div>
                     </td>
@@ -457,6 +498,18 @@ export default function ScoresheetScreen() {
                 </tr>
               )}
 
+              {/* Exceeds-cards error — new result would push the hand total above cards in play */}
+              {exceedsErr === hi && (
+                <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
+                  <td colSpan={NUM_COLS} style={{
+                    padding: '5px 14px', fontSize: 12, color: 'var(--orange)',
+                    fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)',
+                  }}>
+                    ⚠ Total tricks cannot exceed {cards} for this hand
+                  </td>
+                </tr>
+              )}
+
               {/* Auto-fill error — shown when computed 4th result would be negative */}
               {autoFillErr === hi && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
@@ -469,12 +522,14 @@ export default function ScoresheetScreen() {
                 </tr>
               )}
 
-              {/* Set total row — T1/T2/T3/T4 */}
+              {/* Set total row — T1/T2/T3/T4 (points ÷ 100, Premium adjustments applied) */}
               {isSetEnd && (() => {
-                const b = setBounds[setIdx]
-                const setTotals = PLAYER_KEYS.map((_, pi) =>
-                  handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)
-                )
+                const setTotals = PLAYER_KEYS.map((_, pi) => {
+                  const raw = handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)
+                  const bonus = bonusData?.bonuses?.[pi] ?? 0
+                  const penalty = bonusData?.penalties?.[pi] ?? 0
+                  return raw + bonus - penalty
+                })
                 return (
                   <tr style={{ background: 'var(--surface-total)', borderTop: '1px solid var(--border-strong)', borderBottom: '1px solid var(--border-strong)' }}>
                     <td style={{
@@ -490,7 +545,7 @@ export default function ScoresheetScreen() {
                         fontSize: 14, color: 'var(--blue)', borderLeft: '1px solid var(--border)',
                         fontVariantNumeric: 'tabular-nums',
                       }}>
-                        {setTotals[pi]}
+                        {(setTotals[pi] / 100).toFixed(1)}
                       </td>
                     ))}
                   </tr>
@@ -518,7 +573,7 @@ export default function ScoresheetScreen() {
               fontSize: 16, color: 'var(--text-primary)',
               borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums',
             }}>
-              {tot}
+              {(tot / 100).toFixed(1)}
             </td>
           ))}
         </tr>

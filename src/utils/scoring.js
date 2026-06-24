@@ -80,33 +80,38 @@ export function calcSetBonus(handsInSet, playerCount, playerMode) {
     const allExact = handsInSet.every(h => {
       const bid = h?.bids?.[`p${p + 1}`]
       const result = h?.results?.[`p${p + 1}`]
-      return bid != null && result != null && bid > 0 && bid === result
+      return bid != null && result != null && (
+        (bid > 0 && bid === result) ||
+        (bid === 0 && result === 0)
+      )
     })
     if (allExact) perfect.push(p)
   }
   if (perfect.length === 0) return null
 
-  // Find highest score per player in set (excluding last hand)
+  // Find highest score AND its hand index per player (excluding last hand)
   const handsExcludingLast = handsInSet.slice(0, -1)
-  const highestScores = Array.from({ length: playerCount }, (_, p) => {
+  const highestScores = []
+  const highestHandIdxs = []   // index within set (0-based), -1 if no positive score
+  for (let p = 0; p < playerCount; p++) {
     const scores = handsExcludingLast.map(h => h?.points?.[`p${p + 1}`] ?? 0)
-    return Math.max(...scores, 0)
-  })
+    const maxVal = scores.length > 0 ? Math.max(...scores, 0) : 0
+    highestScores.push(maxVal)
+    highestHandIdxs.push(maxVal > 0 ? scores.indexOf(maxVal) : -1)
+  }
 
   const bonuses = Array(playerCount).fill(0)
   const penalties = Array(playerCount).fill(0)
 
-  perfect.forEach(p => {
-    bonuses[p] += highestScores[p] // doubled = original added again
-  })
+  perfect.forEach(p => { bonuses[p] += highestScores[p] })
 
-  // Determine who loses highest score
+  // Each non-perfect player loses their highest score once, regardless of how many got Premium
   if (playerMode === 'individual') {
-    perfect.forEach(() => {
+    if (perfect.length > 0) {
       for (let p = 0; p < playerCount; p++) {
-        if (!perfect.includes(p)) penalties[p] += highestScores[p]
+        if (!perfect.includes(p)) penalties[p] = highestScores[p]
       }
-    })
+    }
   } else {
     // Couples: p0&p2 = teamA, p1&p3 = teamB
     const teamA = [0, 2], teamB = [1, 3]
@@ -118,9 +123,9 @@ export function calcSetBonus(handsInSet, playerCount, playerMode) {
 
     if (allPerfectSameTeam) {
       const losers = perfectTeamA.length === perfect.length ? teamB : teamA
-      losers.forEach(p => { penalties[p] += highestScores[p] })
+      losers.forEach(p => { penalties[p] = highestScores[p] })
     }
   }
 
-  return { perfect, bonuses, penalties, highestScores }
+  return { perfect, bonuses, penalties, highestScores, highestHandIdxs }
 }
