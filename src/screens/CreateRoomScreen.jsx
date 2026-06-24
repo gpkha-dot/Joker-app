@@ -6,6 +6,37 @@ import LanguageToggle from '../components/LanguageToggle'
 
 const STEPS = ['game_mode', 'player_mode', 'hist', 'input_mode', 'players']
 
+// Hist values: 100–1500 in steps of 100
+function isValidHist(s) {
+  if (s === '' || s == null) return true  // empty → will use default
+  const n = parseInt(s)
+  return !isNaN(n) && n >= 100 && n <= 1500 && n % 100 === 0
+}
+
+function HistInput({ label, value, onChange, error, t }) {
+  return (
+    <div>
+      <label style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 6 }}>
+        {label}
+      </label>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={e => onChange(e.target.value.replace(/\D/g, ''))}
+        placeholder="200"
+        autoComplete="off"
+        style={{ width: '100%' }}
+      />
+      {error && (
+        <p style={{ fontSize: 12, color: 'var(--orange)', marginTop: 5 }}>
+          {t('hist_value_error')}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function OptionCard({ selected, onClick, title, desc }) {
   return (
     <button
@@ -45,24 +76,57 @@ export default function CreateRoomScreen() {
     gameMode: 'classic',
     playerMode: 'individual',
     histType: 'custom',
-    histValue: 500,
+    histValue: 200,
+    histValueShort: 200,
+    histValueLong: 500,
     inputMode: 'single',
   })
   const [names, setNames] = useState(['', '', '', ''])
-  const [creatorName, setCreatorName] = useState('')
+
+  // Local string states for hist number inputs — lets user type freely,
+  // separate from the validated number in settings
+  const [histValStr, setHistValStr] = useState('200')
+  const [histShortStr, setHistShortStr] = useState('200')
+  const [histLongStr, setHistLongStr] = useState('500')
 
   useEffect(() => {
-    generateRoomCode().then(code => {
-      setRoomCode(code)
-      setLoading(false)
-    })
+    generateRoomCode().then(code => { setRoomCode(code); setLoading(false) })
   }, [])
+
+  // If game mode changes to 9cards, 'mix' is not valid — reset to 'custom'
+  useEffect(() => {
+    if (settings.gameMode !== 'classic' && settings.histType === 'mix') {
+      setSettings(s => ({ ...s, histType: 'custom' }))
+    }
+  }, [settings.gameMode, settings.histType])
 
   const set = (key, val) => setSettings(s => ({ ...s, [key]: val }))
 
+  const histValErr = !isValidHist(histValStr) && histValStr !== ''
+  const histShortErr = !isValidHist(histShortStr) && histShortStr !== ''
+  const histLongErr = !isValidHist(histLongStr) && histLongStr !== ''
+
   const canNext = () => {
+    if (step === 2) {
+      if (settings.histType === 'custom') return !histValErr
+      if (settings.histType === 'mix') return !histShortErr && !histLongErr
+      return true  // 'special'
+    }
     if (step === 4) return names.every(n => n.trim().length > 0)
     return true
+  }
+
+  // Commit hist string values to settings before advancing from step 2
+  const handleNext = () => {
+    if (step === 2) {
+      if (settings.histType === 'custom') {
+        set('histValue', parseInt(histValStr) || 200)
+      } else if (settings.histType === 'mix') {
+        set('histValueShort', parseInt(histShortStr) || 200)
+        set('histValueLong', parseInt(histLongStr) || 500)
+      }
+    }
+    setStep(s => s + 1)
   }
 
   const handleConfirm = async () => {
@@ -93,6 +157,7 @@ export default function CreateRoomScreen() {
               title={t('mode_9cards')} desc={t('mode_9cards_desc')} />
           </div>
         )
+
       case 1:
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -102,6 +167,7 @@ export default function CreateRoomScreen() {
               title={t('mode_couples')} desc={t('mode_couples_desc')} />
           </div>
         )
+
       case 2:
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -109,26 +175,62 @@ export default function CreateRoomScreen() {
               title={t('hist_custom')} desc={t('hist_custom_desc')} />
             <OptionCard selected={settings.histType === 'special'} onClick={() => set('histType', 'special')}
               title={t('hist_special')} desc={t('hist_special_desc')} />
+            {/* Mix only available in Classic mode */}
+            {settings.gameMode === 'classic' && (
+              <OptionCard selected={settings.histType === 'mix'} onClick={() => set('histType', 'mix')}
+                title={t('hist_mix')} desc={t('hist_mix_desc')} />
+            )}
+
+            {/* Fixed penalty amount input */}
             {settings.histType === 'custom' && (
               <div style={{ marginTop: 4 }}>
-                <label style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'block', marginBottom: 8 }}>
-                  {t('hist_value_label')}
-                </label>
-                <input
-                  type="number"
-                  value={settings.histValue}
-                  min={100} max={1500} step={100}
-                  onChange={e => {
-                    const v = parseInt(e.target.value)
-                    if (!isNaN(v) && v >= 100 && v <= 1500 && v % 100 === 0) set('histValue', v)
+                <HistInput
+                  label={t('hist_value_label')}
+                  value={histValStr}
+                  onChange={v => {
+                    setHistValStr(v)
+                    if (isValidHist(v)) set('histValue', parseInt(v) || 200)
                   }}
-                  style={{ width: '100%' }}
+                  error={histValErr}
+                  t={t}
                 />
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>{t('hist_value_hint')}</p>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 5 }}>
+                  {t('hist_value_hint')}
+                </p>
+              </div>
+            )}
+
+            {/* Mix: two inputs for short and long hands */}
+            {settings.histType === 'mix' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
+                <HistInput
+                  label={t('hist_short_label')}
+                  value={histShortStr}
+                  onChange={v => {
+                    setHistShortStr(v)
+                    if (isValidHist(v)) set('histValueShort', parseInt(v) || 200)
+                  }}
+                  error={histShortErr}
+                  t={t}
+                />
+                <HistInput
+                  label={t('hist_long_label')}
+                  value={histLongStr}
+                  onChange={v => {
+                    setHistLongStr(v)
+                    if (isValidHist(v)) set('histValueLong', parseInt(v) || 500)
+                  }}
+                  error={histLongErr}
+                  t={t}
+                />
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {t('hist_value_hint')}
+                </p>
               </div>
             )}
           </div>
         )
+
       case 3:
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -138,34 +240,33 @@ export default function CreateRoomScreen() {
               title={t('input_each')} desc={t('input_each_desc')} />
           </div>
         )
+
       case 4:
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {names.map((name, i) => {
-              const isTeamA = settings.playerMode === 'couples' && (i === 0 || i === 2)
-              const isTeamB = settings.playerMode === 'couples' && (i === 1 || i === 3)
-              return (
-                <div key={i}>
-                  {settings.playerMode === 'couples' && (
-                    <div style={{
-                      fontSize: 11, fontWeight: 700, letterSpacing: '0.8px',
-                      color: isTeamA ? 'var(--blue)' : 'var(--orange)',
-                      marginBottom: 4, textTransform: 'uppercase',
-                    }}>
-                      {isTeamA ? t('team_a') : t('team_b')}
-                    </div>
-                  )}
-                  <input
-                    placeholder={t('player_name', { n: i + 1 })}
-                    value={name}
-                    onChange={e => setNames(ns => ns.map((n, j) => j === i ? e.target.value : n))}
-                    autoComplete="off"
-                  />
-                </div>
-              )
-            })}
+            {names.map((name, i) => (
+              <div key={i}>
+                {settings.playerMode === 'couples' && (
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, letterSpacing: '0.8px',
+                    color: (i === 0 || i === 2) ? '#7C3AED' : '#0D9488',
+                    marginBottom: 4, textTransform: 'uppercase',
+                  }}>
+                    {(i === 0 || i === 2) ? t('team_a') : t('team_b')}
+                  </div>
+                )}
+                <input
+                  type="text"
+                  placeholder={t('player_name', { n: i + 1 })}
+                  value={name}
+                  onChange={e => setNames(ns => ns.map((n, j) => j === i ? e.target.value : n))}
+                  autoComplete="off"
+                />
+              </div>
+            ))}
           </div>
         )
+
       default:
         return null
     }
@@ -188,7 +289,6 @@ export default function CreateRoomScreen() {
         <LanguageToggle />
       </div>
 
-      {/* Room code */}
       {!loading && (
         <div style={{
           background: 'var(--surface)', borderRadius: 'var(--radius-card)',
@@ -210,8 +310,7 @@ export default function CreateRoomScreen() {
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 24 }}>
         {STEPS.map((_, i) => (
           <div key={i} style={{
-            width: i === step ? 24 : 8, height: 8,
-            borderRadius: 4,
+            width: i === step ? 24 : 8, height: 8, borderRadius: 4,
             background: i <= step ? 'var(--blue)' : 'var(--surface-light)',
             transition: 'all 200ms ease',
           }} />
@@ -229,7 +328,7 @@ export default function CreateRoomScreen() {
       {error && <p style={{ color: 'var(--orange)', fontSize: 14, marginBottom: 12 }}>{error}</p>}
 
       <button
-        onClick={step < STEPS.length - 1 ? () => setStep(s => s + 1) : handleConfirm}
+        onClick={step < STEPS.length - 1 ? handleNext : handleConfirm}
         disabled={!canNext() || creating || loading}
         style={{
           width: '100%', height: 52, background: 'var(--blue)', color: '#fff',

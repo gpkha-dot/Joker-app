@@ -13,7 +13,7 @@ export default function CustomKeyboard({ onKey, value, maxVal }) {
       {KEYS.map(k => {
         const isConfirm = k === '✓'
         const isBack = k === '←'
-        const disabled = !isBack && !isConfirm && maxVal != null && parseInt(value + k) > maxVal
+        const disabled = !isBack && !isConfirm && maxVal != null && parseInt(k) > maxVal
         return (
           <button
             key={k}

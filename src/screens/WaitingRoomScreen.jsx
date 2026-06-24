@@ -80,7 +80,9 @@ export default function WaitingRoomScreen() {
           {[
             s.gameMode === 'classic' ? t('mode_classic') : t('mode_9cards'),
             s.playerMode === 'individual' ? t('mode_individual') : t('mode_couples'),
-            s.histType === 'special' ? t('hist_special') : `Hist ${s.histValue}`,
+            s.histType === 'special' ? t('hist_special')
+              : s.histType === 'mix' ? `${t('hist_mix')} ${s.histValueShort ?? 200}/${s.histValueLong ?? 500}`
+              : `${t('hist_custom')} ${s.histValue ?? 200}`,
           ].map(label => (
             <span key={label} style={{
               background: 'var(--surface-light)', borderRadius: 'var(--radius-badge)',

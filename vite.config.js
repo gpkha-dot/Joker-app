@@ -9,7 +9,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.png', 'icons/*.svg'],
       manifest: {
-        name: 'Joker — ჯოკერი',
+        name: 'Joker',
         short_name: 'Joker',
         description: 'Georgian card game scorekeeper',
         theme_color: '#2563EB',
