@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useRoom } from '../hooks/useRoom'
@@ -11,6 +12,13 @@ export default function WaitingRoomScreen() {
   const mySlot = sessionStorage.getItem('joker_slot')
   const isCreator = mySlot === 'p1'
 
+  // Navigate to game when host starts — must be in useEffect, not render
+  useEffect(() => {
+    if (room?.status === 'playing') {
+      navigate(`/room/${code}/game`)
+    }
+  }, [room?.status, code, navigate])
+
   if (!room) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -20,22 +28,14 @@ export default function WaitingRoomScreen() {
   }
 
   const players = room.players || {}
-  const playerList = ['p1','p2','p3','p4'].map(k => players[k])
+  const playerList = ['p1', 'p2', 'p3', 'p4'].map(k => players[k])
   const filledCount = playerList.filter(Boolean).length
   const allReady = filledCount === 4
+  const s = room.settings || {}
 
   const handleStart = async () => {
     await updateRoomStatus(code, 'playing')
-    navigate(`/room/${code}/game`)
   }
-
-  // Navigate to game if status changed to playing (for non-creators)
-  if (room.status === 'playing') {
-    navigate(`/room/${code}/game`)
-    return null
-  }
-
-  const s = room.settings || {}
 
   return (
     <div style={{ minHeight: '100vh', padding: 24, maxWidth: 480, margin: '0 auto' }}>
@@ -96,8 +96,7 @@ export default function WaitingRoomScreen() {
                 </p>
                 {p && (
                   <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    {t('player_joined')}
-                    {p.isCreator && ' · Host'}
+                    {t('player_joined')}{p.isCreator ? ' · Host' : ''}
                   </p>
                 )}
               </div>
