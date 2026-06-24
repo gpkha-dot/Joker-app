@@ -32,16 +32,6 @@ export default function HomeScreen() {
         }}>
           Joker
         </h1>
-        <p style={{
-          fontFamily: 'BPG Nino Mtavruli, Sylfaen, Georgia, serif',
-          fontSize: 'clamp(30px, 6vw, 52px)',
-          color: 'var(--blue)',
-          marginTop: 10,
-          opacity: 0.8,
-          letterSpacing: '2px',
-        }}>
-          ჯოკერი
-        </p>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', maxWidth: 340 }}>
