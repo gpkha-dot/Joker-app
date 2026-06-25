@@ -356,10 +356,6 @@ export default function ScoresheetScreen() {
     if (!isCouples) return 'transparent'
     return (pi === 0 || pi === 2) ? 'rgba(124,58,237,0.08)' : 'rgba(13,148,136,0.08)'
   }
-  const avatarColor = (pi) => {
-    if (!isCouples) return 'var(--blue)'
-    return (pi === 0 || pi === 2) ? TEAM_A : TEAM_B
-  }
 
   const nextEmpty = getNextEmptyCell(hands, handSeq, activeKeys)
   const nextEmptyIdx = nextEmpty ? getCellSeqIdx(nextEmpty.hand, nextEmpty.type, nextEmpty.player, n) : -1
@@ -368,46 +364,44 @@ export default function ScoresheetScreen() {
   const renderTable = () => (
     <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
       <colgroup>
-        <col style={{ width: mobile ? 32 : 42 }} />
+        <col style={{ width: mobile ? 32 : 44 }} />
         {activeKeys.map((_, i) => <col key={i} />)}
       </colgroup>
 
       <thead>
-        <tr style={{ background: 'var(--surface)' }}>
-          <th style={TH}>🃏</th>
+        <tr>
+          {/* Joker icon — sticky top + left, fills cell */}
+          <th style={{
+            position: 'sticky', top: 0, left: 0, zIndex: 4,
+            background: 'var(--surface)',
+            width: mobile ? 32 : 44, padding: 0,
+            textAlign: 'center', verticalAlign: 'middle',
+            fontSize: mobile ? 20 : 26,
+            boxShadow: '1px 2px 0 var(--border-strong)',
+          }}>🃏</th>
+
+          {/* Player name headers — sticky top, no avatar, dealer = green name */}
           {activeKeys.map((pk, pi) => {
             const name = playerNames[pi]
             const isDealer = !isReadOnly && pi === dealerForCurrentHand
             return (
-              <th key={pk} style={{ ...TH, background: colHeaderBg(pi), padding: '10px 6px 8px', position: 'relative' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                  <div style={{ position: 'relative' }}>
-                    <div style={{
-                      width: mobile ? 26 : 30, height: mobile ? 26 : 30, borderRadius: '50%',
-                      background: avatarColor(pi),
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: mobile ? 10 : 12, fontWeight: 700, color: '#fff',
-                    }}>
-                      {(name[0] || '?').toUpperCase()}
-                    </div>
-                    {isDealer && (
-                      <span style={{
-                        position: 'absolute', top: -4, right: -8,
-                        fontSize: 9, fontWeight: 800, color: '#f59e0b',
-                        background: 'rgba(245,158,11,0.2)', borderRadius: 4,
-                        padding: '1px 3px', lineHeight: 1.2,
-                      }}>▶</span>
-                    )}
-                  </div>
-                  <span style={{
-                    fontFamily: 'Outfit, sans-serif', fontWeight: 700,
-                    fontSize: mobile ? 9 : 12, color: 'var(--text-primary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap', maxWidth: '100%', display: 'block',
-                  }}>
-                    {name}
-                  </span>
-                </div>
+              <th key={pk} style={{
+                position: 'sticky', top: 0, zIndex: 3,
+                background: 'var(--surface)',
+                padding: mobile ? '8px 4px' : '10px 6px',
+                textAlign: 'center',
+                boxShadow: '0 2px 0 var(--border-strong)',
+                fontFamily: 'Outfit, sans-serif',
+              }}>
+                <span style={{
+                  fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+                  fontSize: mobile ? 10 : 12,
+                  color: isDealer ? '#4ADE80' : 'var(--text-primary)',
+                  overflow: 'hidden', textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap', maxWidth: '100%', display: 'block',
+                }}>
+                  {name}
+                </span>
               </th>
             )
           })}
@@ -444,7 +438,13 @@ export default function ScoresheetScreen() {
               )}
 
               <tr style={{ background: isEven ? 'var(--surface)' : 'var(--surface-alt)' }}>
-                <td style={CARDS_CELL}>{cards}</td>
+                <td style={{
+                  ...CARDS_CELL,
+                  position: 'sticky', left: 0, zIndex: 2,
+                  background: isEven ? 'var(--surface)' : 'var(--surface-alt)',
+                  borderLeft: 'none', borderRight: '1px solid var(--border)',
+                  boxShadow: '2px 0 3px rgba(0,0,0,0.15)',
+                }}>{cards}</td>
 
                 {activeKeys.map((pk, pi) => {
                   const bid = h?.bids?.[pk]
@@ -661,7 +661,7 @@ export default function ScoresheetScreen() {
         {hiddenInput}
         {topBar}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <div style={{ flex: '0 0 76%', overflowY: 'auto', overflowX: 'hidden' }}>
+          <div style={{ flex: '0 0 76%', overflow: 'auto' }}>
             {renderTable()}
           </div>
           {!isReadOnly && !isSpectator && (
@@ -681,7 +681,7 @@ export default function ScoresheetScreen() {
       {hiddenInput}
       <div style={{ position: 'sticky', top: 0, zIndex: 20 }}>{topBar}</div>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '28px 24px 80px' }}>
-        <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', overflow: 'auto', maxHeight: 'calc(100vh - 90px)' }}>
           {renderTable()}
         </div>
       </div>

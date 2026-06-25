@@ -63,9 +63,8 @@ export default function CreateRoomScreen() {
   })
   // Each mode: single creator name
   const [creatorName, setCreatorName] = useState('')
-  // Single mode: all 4 names + which is creator
+  // Single mode: all 4 names (creator is always p1)
   const [names, setNames] = useState(['', '', '', ''])
-  const [creatorIdx, setCreatorIdx] = useState(0)
 
   const [histValStr, setHistValStr] = useState('200')
   const [histShortStr, setHistShortStr] = useState('200')
@@ -77,7 +76,7 @@ export default function CreateRoomScreen() {
   // Dynamic steps based on input mode
   const steps = useMemo(() =>
     isSingle
-      ? [...BASE_STEPS, 'all_names', 'choose_me']
+      ? [...BASE_STEPS, 'all_names']
       : [...BASE_STEPS, 'your_name'],
     [isSingle]
   )
@@ -128,8 +127,8 @@ export default function CreateRoomScreen() {
     try {
       let creatorSlot
       if (isSingle) {
-        await createRoom(roomCode, settings, names, creatorIdx)
-        creatorSlot = `p${creatorIdx + 1}`
+        await createRoom(roomCode, settings, names, 0)
+        creatorSlot = 'p1'
       } else {
         await createRoom(roomCode, settings, creatorName.trim())
         creatorSlot = 'p1'
@@ -249,21 +248,6 @@ export default function CreateRoomScreen() {
           </div>
         )
 
-      case 'choose_me':
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {names.map((name, i) => (
-              <OptionCard
-                key={i}
-                selected={creatorIdx === i}
-                onClick={() => setCreatorIdx(i)}
-                title={name || t('player_name', { n: i + 1 })}
-                desc={`Player ${i + 1}${isCouples ? ` · ${(i === 0 || i === 2) ? t('team_a') : t('team_b')}` : ''}`}
-              />
-            ))}
-          </div>
-        )
-
       default:
         return null
     }
@@ -276,7 +260,6 @@ export default function CreateRoomScreen() {
     input_mode: t('step_input_mode'),
     your_name: t('step_your_name'),
     all_names: t('step_players'),
-    choose_me: t('step_choose_player'),
   }
 
   return (

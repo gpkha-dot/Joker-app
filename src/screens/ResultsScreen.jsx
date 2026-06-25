@@ -24,10 +24,13 @@ export default function ResultsScreen() {
   const { settings, hands = {}, players = {} } = room
   const { gameMode, playerMode, histType, histValue } = settings
   const handSeq = buildHandSequence(gameMode)
-  const playerKeys = ['p1','p2','p3','p4']
-  const playerNames = playerKeys.map(k => players[k]?.name || k)
 
-  const totals = playerKeys.map((pk, pi) => {
+  // Use display order set by host in waiting room (respects drag reorder)
+  const rawOrder = Array.isArray(room.displayOrder) ? room.displayOrder : ['p1','p2','p3','p4']
+  const activeKeys = rawOrder.filter(k => players[k]?.claimed === true)
+  const playerNames = activeKeys.map(k => players[k]?.name || k)
+
+  const totals = activeKeys.map((pk, pi) => {
     let sum = 0
     for (let hi = 0; hi < handSeq.length; hi++) {
       const h = hands[hi] || {}
@@ -39,7 +42,8 @@ export default function ResultsScreen() {
   })
 
   let standings = []
-  if (playerMode === 'couples') {
+  if (playerMode === 'couples' && activeKeys.length >= 4) {
+    // display positions 0&2 = Team A, 1&3 = Team B (mirrors waiting room ordering)
     const teamA = totals[0].total + totals[2].total
     const teamB = totals[1].total + totals[3].total
     standings = [

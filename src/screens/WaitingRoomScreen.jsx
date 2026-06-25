@@ -1,6 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import {
+  DndContext, closestCenter,
+  PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useRoom } from '../hooks/useRoom'
 import { startGame, cancelRoom, leaveRoom, updatePlayerOrder } from '../firebase/roomService'
 import ConfirmModal from '../components/ConfirmModal'
@@ -9,6 +18,90 @@ import LanguageToggle from '../components/LanguageToggle'
 const SLOT_KEYS = ['p1', 'p2', 'p3', 'p4']
 const TEAM_A = '#7C3AED'
 const TEAM_B = '#0D9488'
+
+function teamColor(pos) { return (pos === 0 || pos === 2) ? TEAM_A : TEAM_B }
+function teamBg(pos) { return (pos === 0 || pos === 2) ? 'rgba(124,58,237,0.12)' : 'rgba(13,148,136,0.12)' }
+
+function SortablePlayerCard({ slot, idx, player, claimed, canDrag, isCouples, allFourJoined, t }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: slot,
+    disabled: !canDrag,
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.35 : 1,
+        zIndex: isDragging ? 99 : 'auto',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '11px 14px',
+        background: 'var(--surface-light)',
+        borderRadius: 12,
+        border: `1.5px solid ${claimed ? 'rgba(37,99,235,0.2)' : 'var(--border)'}`,
+        userSelect: 'none', WebkitUserSelect: 'none',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Position number */}
+      <span style={{
+        width: 20, textAlign: 'center', flexShrink: 0,
+        fontSize: 13, fontWeight: 800, lineHeight: 1,
+        color: isCouples && allFourJoined ? teamColor(idx) : 'var(--text-secondary)',
+        fontFamily: 'Outfit, sans-serif',
+      }}>
+        {idx + 1}
+      </span>
+
+      {/* Drag handle — listeners spread here only, so touch scrolls rest of card normally */}
+      {canDrag && (
+        <span
+          {...listeners}
+          style={{
+            flexShrink: 0, fontSize: 20, lineHeight: 1,
+            color: 'var(--text-secondary)', opacity: 0.5,
+            cursor: isDragging ? 'grabbing' : 'grab',
+            paddingRight: 2, touchAction: 'none',
+          }}
+        >
+          ≡
+        </span>
+      )}
+
+      {/* Name + status (no avatar circle) */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{
+          fontWeight: claimed ? 600 : 400, fontSize: 15,
+          fontFamily: 'Outfit, sans-serif',
+          color: claimed ? 'var(--text-primary)' : 'var(--text-secondary)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
+        }}>
+          {claimed ? player?.name : t('player_waiting')}
+        </p>
+        {claimed && (
+          <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1 }}>
+            {t('player_joined')}{player?.isCreator ? ' · Host' : ''}
+          </p>
+        )}
+      </div>
+
+      {/* Team badge */}
+      {isCouples && allFourJoined && (
+        <span style={{
+          fontSize: 10, fontWeight: 700,
+          color: teamColor(idx), background: teamBg(idx),
+          padding: '3px 8px', borderRadius: 6,
+          fontFamily: 'Outfit, sans-serif', flexShrink: 0,
+        }}>
+          {(idx === 0 || idx === 2) ? t('team_a') : t('team_b')}
+        </span>
+      )}
+    </div>
+  )
+}
 
 export default function WaitingRoomScreen() {
   const { code } = useParams()
@@ -20,91 +113,22 @@ export default function WaitingRoomScreen() {
 
   const [showLeaveModal, setShowLeaveModal] = useState(false)
   const [localOrder, setLocalOrder] = useState(SLOT_KEYS)
-  const [dragFromIdx, setDragFromIdx] = useState(null)
-  const [dragOverIdx, setDragOverIdx] = useState(null)
+  const [dragging, setDragging] = useState(false)
 
-  // Refs used inside native event listeners to avoid stale closures
-  const listRef = useRef(null)
-  const touchDrag = useRef(null)    // { fromIdx, toIdx } — active touch drag state
-  const localOrderRef = useRef(SLOT_KEYS)
-  const canDragRef = useRef(false)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  )
 
   useEffect(() => {
     if (room?.status === 'playing') navigate(`/room/${code}/game`)
   }, [room?.status, code, navigate])
 
-  // Sync display order from Firebase (skip while host is actively dragging)
+  // Sync display order from Firebase (skip during active drag to avoid jitter)
   useEffect(() => {
-    if (dragFromIdx !== null) return
+    if (dragging) return
     const order = room?.displayOrder
-    if (Array.isArray(order) && order.length === 4) {
-      setLocalOrder(order)
-      localOrderRef.current = order
-    }
-  }, [JSON.stringify(room?.displayOrder)]) // eslint-disable-line
-
-  // Keep localOrderRef in sync with state (for use inside touch handlers)
-  useEffect(() => { localOrderRef.current = localOrder }, [localOrder])
-
-  // Register touch drag listeners with passive:false so we can preventDefault on the handle
-  useEffect(() => {
-    const el = listRef.current
-    if (!el) return
-
-    const onTouchStart = (e) => {
-      if (!canDragRef.current) return
-      const handle = e.target.closest('[data-drag-handle]')
-      if (!handle) return
-      const card = handle.closest('[data-slot-idx]')
-      const idx = parseInt(card?.getAttribute('data-slot-idx') ?? '-1')
-      if (idx < 0) return
-      e.preventDefault() // stop page scroll for this gesture
-      touchDrag.current = { fromIdx: idx, toIdx: idx }
-      setDragFromIdx(idx)
-      setDragOverIdx(idx)
-    }
-
-    const onTouchMove = (e) => {
-      if (!touchDrag.current) return
-      e.preventDefault()
-      const touch = e.touches[0]
-      const items = el.querySelectorAll('[data-slot-idx]')
-      items.forEach(item => {
-        const rect = item.getBoundingClientRect()
-        const idx = parseInt(item.getAttribute('data-slot-idx'))
-        if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
-          touchDrag.current.toIdx = idx
-          setDragOverIdx(idx)
-        }
-      })
-    }
-
-    const onTouchEnd = () => {
-      if (touchDrag.current) {
-        const { fromIdx, toIdx } = touchDrag.current
-        if (fromIdx !== toIdx) {
-          const newOrder = [...localOrderRef.current]
-          const [item] = newOrder.splice(fromIdx, 1)
-          newOrder.splice(toIdx, 0, item)
-          setLocalOrder(newOrder)
-          localOrderRef.current = newOrder
-          updatePlayerOrder(code, newOrder).catch(console.error)
-        }
-      }
-      touchDrag.current = null
-      setDragFromIdx(null)
-      setDragOverIdx(null)
-    }
-
-    el.addEventListener('touchstart', onTouchStart, { passive: false })
-    el.addEventListener('touchmove', onTouchMove, { passive: false })
-    el.addEventListener('touchend', onTouchEnd)
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-    }
-  }, [code]) // code is stable; all mutable values accessed via refs
+    if (Array.isArray(order) && order.length === 4) setLocalOrder(order)
+  }, [JSON.stringify(room?.displayOrder), dragging]) // eslint-disable-line
 
   if (!room) {
     return (
@@ -125,41 +149,18 @@ export default function WaitingRoomScreen() {
   const needMore = 4 - claimedCount
   const canDrag = isCreator && allFourJoined
 
-  // Update ref so touch handlers pick up the latest value without re-registration
-  canDragRef.current = canDrag
-
-  // HTML5 DnD handlers (desktop)
-  const handleDragStart = (e, idx) => {
-    if (!canDrag) { e.preventDefault(); return }
-    setDragFromIdx(idx)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-  const handleDragOver = (e, idx) => {
-    if (!canDrag) return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    setDragOverIdx(idx)
-  }
-  const handleDrop = (e, idx) => {
-    e.preventDefault()
-    if (dragFromIdx !== null && dragFromIdx !== idx) {
-      const newOrder = [...localOrder]
-      const [item] = newOrder.splice(dragFromIdx, 1)
-      newOrder.splice(idx, 0, item)
-      setLocalOrder(newOrder)
-      localOrderRef.current = newOrder
-      updatePlayerOrder(code, newOrder).catch(console.error)
-    }
-    setDragFromIdx(null)
-    setDragOverIdx(null)
-  }
-  const handleDragEnd = () => {
-    setDragFromIdx(null)
-    setDragOverIdx(null)
+  const handleDragEnd = ({ active, over }) => {
+    setDragging(false)
+    if (!over || active.id === over.id) return
+    const oldIdx = localOrder.indexOf(active.id)
+    const newIdx = localOrder.indexOf(over.id)
+    if (oldIdx < 0 || newIdx < 0) return
+    const newOrder = arrayMove(localOrder, oldIdx, newIdx)
+    setLocalOrder(newOrder)
+    updatePlayerOrder(code, newOrder).catch(console.error)
   }
 
   const doStart = async () => {
-    // Always write current order to Firebase before start so scoresheet uses it
     await updatePlayerOrder(code, localOrder)
     await startGame(code, claimedCount)
   }
@@ -178,17 +179,11 @@ export default function WaitingRoomScreen() {
     navigate('/')
   }
 
-  const teamColor = (pos) => (pos === 0 || pos === 2) ? TEAM_A : TEAM_B
-  const teamBg = (pos) => (pos === 0 || pos === 2) ? 'rgba(124,58,237,0.12)' : 'rgba(13,148,136,0.12)'
-
   return (
     <div style={{ minHeight: '100vh', padding: 24, maxWidth: 480, margin: '0 auto' }}>
       {/* Top bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 40 }}>
-        <button
-          onClick={() => setShowLeaveModal(true)}
-          style={{ background: 'none', color: 'var(--text-secondary)', fontSize: 15, padding: 0, fontFamily: 'Outfit, sans-serif' }}
-        >
+        <button onClick={() => setShowLeaveModal(true)} style={{ background: 'none', color: 'var(--text-secondary)', fontSize: 15, padding: 0, fontFamily: 'Outfit, sans-serif' }}>
           ← {t('back')}
         </button>
         <LanguageToggle />
@@ -197,10 +192,7 @@ export default function WaitingRoomScreen() {
       {/* Room code */}
       <div style={{ textAlign: 'center', marginBottom: 36 }}>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>{t('room_code')}</p>
-        <p style={{
-          fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 56,
-          letterSpacing: '14px', color: 'var(--blue)', fontVariantNumeric: 'tabular-nums',
-        }}>
+        <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 56, letterSpacing: '14px', color: 'var(--blue)', fontVariantNumeric: 'tabular-nums' }}>
           {code}
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>{t('share_code')}</p>
@@ -217,145 +209,56 @@ export default function WaitingRoomScreen() {
               : `${t('hist_custom')} ${s.histValue ?? 200}`,
             s.inputMode === 'each' ? t('input_each') : t('input_single'),
           ].map(label => (
-            <span key={label} style={{
-              background: 'var(--surface-light)', borderRadius: 'var(--radius-badge)',
-              padding: '4px 10px', fontSize: 12, color: 'var(--text-secondary)',
-              border: '1px solid var(--border)', fontFamily: 'Outfit, sans-serif',
-            }}>
+            <span key={label} style={{ background: 'var(--surface-light)', borderRadius: 'var(--radius-badge)', padding: '4px 10px', fontSize: 12, color: 'var(--text-secondary)', border: '1px solid var(--border)', fontFamily: 'Outfit, sans-serif' }}>
               {label}
             </span>
           ))}
         </div>
       </div>
 
-      {/* Drag hint — only shown to host when all 4 have joined */}
+      {/* Drag hint — visible to host once all 4 have joined (both modes) */}
       {canDrag && (
-        <p style={{
-          fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center',
-          marginBottom: 10, lineHeight: 1.5, padding: '0 8px',
-        }}>
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', marginBottom: 10, lineHeight: 1.5, padding: '0 8px' }}>
           {t('drag_order_hint')}
         </p>
       )}
 
-      {/* Player slot list */}
+      {/* Player list with sortable drag */}
       <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: 20, marginBottom: 20, border: '1px solid var(--border)' }}>
-        <p style={{
-          fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 13,
-          marginBottom: 16, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.6px',
-        }}>
+        <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 13, marginBottom: 16, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
           {t('waiting_players')} ({claimedCount}/4)
         </p>
 
-        <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {localOrder.map((pk, i) => {
-            const p = players[pk]
-            const claimed = p?.claimed === true
-            const isDragging = dragFromIdx === i
-            const isOver = dragOverIdx === i && dragFromIdx !== null && dragFromIdx !== i
-
-            return (
-              <div
-                key={pk}
-                data-slot-idx={i}
-                draggable={canDrag}
-                onDragStart={(e) => handleDragStart(e, i)}
-                onDragOver={(e) => handleDragOver(e, i)}
-                onDrop={(e) => handleDrop(e, i)}
-                onDragEnd={handleDragEnd}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '11px 14px',
-                  background: 'var(--surface-light)',
-                  borderRadius: 12,
-                  border: `1.5px solid ${isOver ? 'var(--blue)' : claimed ? 'rgba(37,99,235,0.2)' : 'var(--border)'}`,
-                  opacity: isDragging ? 0.35 : 1,
-                  boxShadow: isOver ? '0 0 0 3px rgba(37,99,235,0.2)' : 'none',
-                  transition: isDragging ? 'none' : 'border-color 120ms, box-shadow 120ms, opacity 80ms',
-                  cursor: canDrag ? 'grab' : 'default',
-                  userSelect: 'none', WebkitUserSelect: 'none',
-                }}
-              >
-                {/* Position number */}
-                <span style={{
-                  width: 20, textAlign: 'center', flexShrink: 0,
-                  fontSize: 13, fontWeight: 800, lineHeight: 1,
-                  color: isCouples && allFourJoined ? teamColor(i) : 'var(--text-secondary)',
-                  fontFamily: 'Outfit, sans-serif',
-                }}>
-                  {i + 1}
-                </span>
-
-                {/* Drag handle — visible only to host when ready */}
-                {canDrag && (
-                  <span
-                    data-drag-handle
-                    style={{
-                      flexShrink: 0, fontSize: 20, lineHeight: 1,
-                      color: 'var(--text-secondary)', opacity: 0.45,
-                      cursor: 'grab', paddingRight: 2,
-                    }}
-                  >
-                    ≡
-                  </span>
-                )}
-
-                {/* Avatar circle */}
-                <div style={{
-                  width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-                  background: claimed
-                    ? (isCouples && allFourJoined ? teamColor(i) : 'var(--blue)')
-                    : 'var(--surface)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 15,
-                  color: claimed ? '#fff' : 'var(--border)',
-                  border: claimed ? 'none' : '2px dashed var(--border)',
-                }}>
-                  {claimed ? (p.name?.[0] || '?').toUpperCase() : '—'}
-                </div>
-
-                {/* Name + status */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{
-                    fontWeight: claimed ? 600 : 400, fontSize: 15,
-                    fontFamily: 'Outfit, sans-serif',
-                    color: claimed ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
-                  }}>
-                    {claimed ? p.name : t('player_waiting')}
-                  </p>
-                  {claimed && (
-                    <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1 }}>
-                      {t('player_joined')}{p.isCreator ? ' · Host' : ''}
-                    </p>
-                  )}
-                </div>
-
-                {/* Team badge — couples mode + all joined */}
-                {isCouples && allFourJoined && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700,
-                    color: teamColor(i),
-                    background: teamBg(i),
-                    padding: '3px 8px', borderRadius: 6,
-                    fontFamily: 'Outfit, sans-serif', flexShrink: 0,
-                  }}>
-                    {(i === 0 || i === 2) ? t('team_a') : t('team_b')}
-                  </span>
-                )}
-              </div>
-            )
-          })}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setDragging(true)}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setDragging(false)}
+        >
+          <SortableContext items={localOrder} strategy={verticalListSortingStrategy}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {localOrder.map((pk, i) => (
+                <SortablePlayerCard
+                  key={pk}
+                  slot={pk}
+                  idx={i}
+                  player={players[pk]}
+                  claimed={players[pk]?.claimed === true}
+                  canDrag={canDrag}
+                  isCouples={isCouples}
+                  allFourJoined={allFourJoined}
+                  t={t}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
 
-      {/* Couples team pairing summary — updates live as host reorders */}
+      {/* Couples team pairing — live as host reorders */}
       {isCouples && allFourJoined && (
-        <div style={{
-          background: 'var(--surface)', borderRadius: 12,
-          padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border)',
-          display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 12, padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {[
             { color: TEAM_A, label: t('team_a'), a: localOrder[0], b: localOrder[2] },
             { color: TEAM_B, label: t('team_b'), a: localOrder[1], b: localOrder[3] },
@@ -363,15 +266,15 @@ export default function WaitingRoomScreen() {
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />
               <span style={{ fontSize: 14, fontFamily: 'Outfit, sans-serif', color: 'var(--text-primary)' }}>
-                <strong style={{ color }}>{label}:</strong>
-                {' '}{players[a]?.name || '?'} & {players[b]?.name || '?'}
+                <strong style={{ color }}>{label}:</strong>{' '}
+                {players[a]?.name || '?'} & {players[b]?.name || '?'}
               </span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Start button / waiting message */}
+      {/* Start button / waiting */}
       {isCreator ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {!canStart && (
@@ -382,13 +285,7 @@ export default function WaitingRoomScreen() {
           <button
             onClick={doStart}
             disabled={!canStart}
-            style={{
-              width: '100%', height: 54, background: 'var(--blue)', color: '#fff',
-              borderRadius: 'var(--radius-btn)', fontSize: 17,
-              fontFamily: 'Outfit, sans-serif', fontWeight: 700,
-              opacity: canStart ? 1 : 0.4,
-              cursor: canStart ? 'pointer' : 'not-allowed',
-            }}
+            style={{ width: '100%', height: 54, background: 'var(--blue)', color: '#fff', borderRadius: 'var(--radius-btn)', fontSize: 17, fontFamily: 'Outfit, sans-serif', fontWeight: 700, opacity: canStart ? 1 : 0.4, cursor: canStart ? 'pointer' : 'not-allowed' }}
           >
             {t('waiting_start')}
           </button>
