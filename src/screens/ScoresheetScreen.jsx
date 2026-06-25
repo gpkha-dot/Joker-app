@@ -572,13 +572,16 @@ export default function ScoresheetScreen() {
                     </tr>
                     {isCouples && (
                       <tr style={{ background: '#16162a', borderBottom: '2px solid var(--blue)' }}>
-                        <td style={{ padding: '5px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>▶</td>
-                        <td colSpan={2} style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 13, color: TEAM_A, borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
+                        <td style={{ padding: '5px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, background: '#16162a' }}>▶</td>
+                        {/* Team A under position 0 (p1), Team B under position 1 (p2), positions 2–3 empty */}
+                        <td style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 14, color: '#2563EB', borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
                           {(teamA / 100).toFixed(1)}
                         </td>
-                        <td colSpan={2} style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 13, color: TEAM_B, borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
+                        <td style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 14, color: '#2563EB', borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
                           {(teamB / 100).toFixed(1)}
                         </td>
+                        <td style={{ borderLeft: '1px solid var(--border)' }} />
+                        <td style={{ borderLeft: '1px solid var(--border)' }} />
                       </tr>
                     )}
                   </>
@@ -598,16 +601,18 @@ export default function ScoresheetScreen() {
           ))}
         </tr>
 
-        {/* Grand team total (couples only) */}
+        {/* Grand team total (couples only) — value under p1 (Team A) and p2 (Team B), p3/p4 empty */}
         {isCouples && (
           <tr style={{ background: '#121222', borderTop: '1px solid var(--border)' }}>
-            <td style={{ padding: '7px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>▶▶</td>
-            <td colSpan={2} style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 15, color: TEAM_A, borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
+            <td style={{ padding: '7px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, background: '#121222' }}>▶▶</td>
+            <td style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 15, color: '#2563EB', borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
               {((grandTotals[0] + grandTotals[2]) / 100).toFixed(1)}
             </td>
-            <td colSpan={2} style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 15, color: TEAM_B, borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
+            <td style={{ textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 15, color: '#2563EB', borderLeft: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}>
               {((grandTotals[1] + grandTotals[3]) / 100).toFixed(1)}
             </td>
+            <td style={{ borderLeft: '1px solid var(--border)' }} />
+            <td style={{ borderLeft: '1px solid var(--border)' }} />
           </tr>
         )}
       </tbody>
