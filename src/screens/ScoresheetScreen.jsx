@@ -6,7 +6,7 @@ import { useOrientation } from '../hooks/useOrientation'
 import { updateHand, updateCurrentHand, updateRoomStatus } from '../firebase/roomService'
 import {
   buildHandSequence, getSetBoundaries, getSetForHand,
-  calcPoints, isHistPenalty, isForbiddenBid, calcSetBonus,
+  calcPoints, isForbiddenBid, calcSetBonus,
 } from '../utils/scoring'
 import RotatePrompt from '../components/RotatePrompt'
 import CustomKeyboard from '../components/CustomKeyboard'
@@ -16,12 +16,36 @@ import ConfirmModal from '../components/ConfirmModal'
 const PLAYER_KEYS = ['p1', 'p2', 'p3', 'p4']
 const isMobileWidth = () => window.innerWidth <= 1024
 const ROW_H = 52
-// Team identity colors — distinct from score colors (blue=good, orange=bad)
-const TEAM_A = '#7C3AED'   // purple — players 1 & 3
-const TEAM_B = '#0D9488'   // teal   — players 2 & 4
+const TEAM_A = '#7C3AED'
+const TEAM_B = '#0D9488'
+
+// Next unfilled cell in sequential game order (dealer rotation for bids, L→R for results)
+function getNextEmptyCell(handsData, handSeq) {
+  for (let hi = 0; hi < handSeq.length; hi++) {
+    const h = handsData[hi] ?? {}
+    const firstBidder = hi % 4
+    for (let i = 0; i < 4; i++) {
+      const pi = (firstBidder + i) % 4
+      if (h?.bids?.[PLAYER_KEYS[pi]] == null) return { hand: hi, type: 'bid', player: pi }
+    }
+    for (let pi = 0; pi < 4; pi++) {
+      if (h?.results?.[PLAYER_KEYS[pi]] == null) return { hand: hi, type: 'result', player: pi }
+    }
+  }
+  return null
+}
+
+// Monotonically increasing index for sequential game order
+function getCellSeqIdx(hi, type, pi) {
+  if (type === 'bid') {
+    const firstBidder = hi % 4
+    const order = [0, 1, 2, 3].map(i => (firstBidder + i) % 4)
+    return hi * 8 + order.indexOf(pi)
+  }
+  return hi * 8 + 4 + pi
+}
 
 export default function ScoresheetScreen() {
-  // ── Hooks (ALL before any conditional return) ──────────────────────
   const { code } = useParams()
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -29,12 +53,13 @@ export default function ScoresheetScreen() {
   const isLandscape = useOrientation()
   const mySlot = sessionStorage.getItem('joker_slot') || 'p1'
   const hiddenInputRef = useRef(null)
+  const initialized = useRef(false)
 
   const [activeCell, setActiveCell] = useState(null)
   const [inputVal, setInputVal] = useState('')
   const [forbiddenWarn, setForbiddenWarn] = useState(false)
-  const [autoFillErr, setAutoFillErr] = useState(null)   // null | hand-index
-  const [exceedsErr, setExceedsErr] = useState(null)     // null | hand-index
+  const [autoFillErr, setAutoFillErr] = useState(null)
+  const [exceedsErr, setExceedsErr] = useState(null)
   const [setBonus, setSetBonus] = useState(null)
   const [lastCompletedSet, setLastCompletedSet] = useState(-1)
   const [showLeaveModal, setShowLeaveModal] = useState(false)
@@ -46,25 +71,29 @@ export default function ScoresheetScreen() {
   const playerMode = settings.playerMode ?? 'individual'
   const histType = settings.histType ?? 'custom'
   const histValue = settings.histValue ?? 200
-  const histValueShort = settings.histValueShort ?? 200   // mix mode: short hands (1-8 cards)
-  const histValueLong = settings.histValueLong ?? 500     // mix mode: long hands (9 cards)
+  const histValueShort = settings.histValueShort ?? 200
+  const histValueLong = settings.histValueLong ?? 500
   const inputMode = settings.inputMode ?? 'single'
   const handSeq = useMemo(() => buildHandSequence(gameMode), [gameMode])
   const setBounds = useMemo(() => getSetBoundaries(gameMode), [gameMode])
   const playerNames = PLAYER_KEYS.map(k => players[k]?.name || k)
   const isCouples = playerMode === 'couples'
-  const isCreator = mySlot === 'p1'
-  const canEdit = inputMode === 'single' ? isCreator : true
+  const isSpectator = mySlot === 'spectator'
+  const isReadOnly = room?.status === 'finished'
+  const isCreator = !isSpectator && (players[mySlot]?.isCreator === true)
+  const canEdit = !isReadOnly && !isSpectator && (inputMode === 'single' ? isCreator : true)
   const mobile = isMobileWidth()
   const showRotate = mobile && !isLandscape
+  const currentHand = room?.currentHand ?? 0
+  const dealerForCurrentHand = (3 + currentHand) % 4
 
-  // Resolve effective hist type+value for a hand with `cards` cards in play.
-  // 'mix' uses different amounts for short (1-8) vs long (9) hands.
-  const resolveHist = (cards) => histType === 'mix'
-    ? { ht: 'custom', hv: cards <= 8 ? histValueShort : histValueLong }
-    : { ht: histType, hv: histValue }
+  const resolveHist = useCallback((cards) =>
+    histType === 'mix'
+      ? { ht: 'custom', hv: cards <= 8 ? histValueShort : histValueLong }
+      : { ht: histType, hv: histValue },
+    [histType, histValue, histValueShort, histValueLong]
+  )
 
-  // Points per cell — null until BOTH bid AND result exist
   const handPoints = useMemo(() =>
     handSeq.map((cards, hi) => {
       const h = hands[hi] ?? {}
@@ -81,7 +110,6 @@ export default function ScoresheetScreen() {
     [hands, handSeq, histType, histValue, histValueShort, histValueLong]
   )
 
-  // Premium/penalty adjustments per completed set
   const setBonusData = useMemo(() =>
     setBounds.map(b => {
       const handsInSet = Array.from({ length: b.end - b.start + 1 }, (_, i) => hands[b.start + i] ?? {})
@@ -92,7 +120,6 @@ export default function ScoresheetScreen() {
     [hands, setBounds, playerMode]
   )
 
-  // Running totals — raw hand points plus Premium bonus/penalty adjustments
   const grandTotals = useMemo(() =>
     PLAYER_KEYS.map((_, pi) => {
       const raw = handPoints.reduce((s, row) => s + (row[pi] ?? 0), 0)
@@ -102,14 +129,22 @@ export default function ScoresheetScreen() {
     [handPoints, setBonusData]
   )
 
-  // Focus hidden input on desktop whenever active cell changes
+  // Initialize active cell to next empty on first room load
   useEffect(() => {
-    if (!mobile && activeCell) hiddenInputRef.current?.focus()
-  }, [activeCell, mobile])
+    if (!room || initialized.current || isReadOnly || isSpectator) return
+    initialized.current = true
+    const next = getNextEmptyCell(hands, handSeq)
+    if (next) setActiveCell(next)
+  }, [room]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Set completion detection
+  // Focus hidden input on desktop when active cell changes
   useEffect(() => {
-    if (!room) return
+    if (!mobile && activeCell && canEdit) hiddenInputRef.current?.focus()
+  }, [activeCell, mobile, canEdit])
+
+  // Set completion detection — guards against readonly to avoid re-navigating to results
+  useEffect(() => {
+    if (!room || isReadOnly) return
     setBounds.forEach((b, si) => {
       if (si <= lastCompletedSet) return
       const allDone = Array.from({ length: b.end - b.start + 1 }, (_, i) => {
@@ -120,7 +155,13 @@ export default function ScoresheetScreen() {
       setLastCompletedSet(si)
       const handsInSet = Array.from({ length: b.end - b.start + 1 }, (_, i) => hands[b.start + i] ?? {})
       const bonus = calcSetBonus(handsInSet, 4, playerMode)
-      if (bonus) setSetBonus({ ...bonus, setIndex: si })
+      if (bonus) {
+        const setTotals = PLAYER_KEYS.map((_, pi) => {
+          const raw = handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)
+          return raw + (bonus.bonuses[pi] ?? 0) - (bonus.penalties[pi] ?? 0)
+        })
+        setSetBonus({ ...bonus, setIndex: si, setTotals })
+      }
       if (si === setBounds.length - 1) {
         setTimeout(async () => {
           await updateRoomStatus(code, 'finished')
@@ -130,67 +171,39 @@ export default function ScoresheetScreen() {
     })
   }, [hands]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const advanceCell = useCallback((hi, type, pi) => {
-    if (type === 'bid') {
-      const h = hands[hi] ?? {}
-      for (let i = 1; i <= 4; i++) {
-        const next = (pi + i) % 4
-        if (h?.bids?.[PLAYER_KEYS[next]] == null) {
-          setActiveCell({ hand: hi, type: 'bid', player: next })
-          return
-        }
-      }
-      setActiveCell({ hand: hi, type: 'result', player: 0 })
-    } else {
-      if (pi + 1 < 4) {
-        setActiveCell({ hand: hi, type: 'result', player: pi + 1 })
-      } else {
-        const nextHi = hi + 1
-        if (nextHi < handSeq.length) {
-          setActiveCell({ hand: nextHi, type: 'bid', player: 0 })
-          updateCurrentHand(code, nextHi)
-        } else {
-          setActiveCell(null)
-        }
-      }
-    }
-  }, [hands, handSeq, code])
-
-  const confirmCell = useCallback(async () => {
-    if (!activeCell || inputVal === '') return
-    const num = parseInt(inputVal)
-    if (isNaN(num)) { setActiveCell(null); setInputVal(''); return }
-    const { hand: hi, type, player: pi } = activeCell
+  // Central save function — handles bid + result, advances activeCell, handles auto-fill
+  const doSaveCell = useCallback(async (hi, type, pi, num) => {
     const pk = PLAYER_KEYS[pi]
     const h = hands[hi] ?? {}
     const cards = handSeq[hi]
 
     if (type === 'bid') {
-      const allBids = PLAYER_KEYS.map((k, i) => i === pi ? num : (h?.bids?.[k] ?? null))
-      // All 4 bids filled and total equals cards — forbidden by the rules
-      if (allBids.every(b => b != null) && isForbiddenBid(allBids, pi, cards)) {
-        setForbiddenWarn(true)
-        return   // block save; player must change their bid
-      }
       await updateHand(code, hi, { [`bids/${pk}`]: num })
-    } else {
-      // Reject if adding this result would push the hand total above cards in play
-      const existingSum = PLAYER_KEYS.reduce((s, k, i) => i !== pi ? s + (h?.results?.[k] ?? 0) : s, 0)
-      if (existingSum + num > cards) {
-        setExceedsErr(hi)
-        return
+      // If result already exists (editing past bid), recalculate points
+      const existingResult = h?.results?.[pk]
+      if (existingResult != null) {
+        const { ht, hv } = resolveHist(cards)
+        const pts = calcPoints(num, existingResult, cards, ht, hv)
+        await updateHand(code, hi, { [`points/${pk}`]: pts })
       }
+    } else {
+      const existingSum = PLAYER_KEYS.reduce((s, k, i) => i !== pi ? s + (h?.results?.[k] ?? 0) : s, 0)
+      if (existingSum + num > cards) { setExceedsErr(hi); return }
       const { ht, hv } = resolveHist(cards)
       const bid = h?.bids?.[pk] ?? 0
       const pts = calcPoints(bid, num, cards, ht, hv)
-      await updateHand(code, hi, { [`results/${pk}`]: num, [`points/${pk}`]: pts })
+      await updateHand(code, hi, {
+        [`results/${pk}`]: num,
+        [`points/${pk}`]: pts,
+        [`autoResult/${pk}`]: null,
+      })
 
-      // Auto-fill the 4th player's result once 3 are entered
-      // resultsNow reflects state AFTER saving this result (Firebase hasn't updated yet)
+      // Auto-fill 4th result
       const resultsNow = PLAYER_KEYS.map((k, i) => i === pi ? num : (h?.results?.[k] ?? null))
       const filledCnt = resultsNow.filter(r => r != null).length
       if (filledCnt === 3) {
-        const missingPk = PLAYER_KEYS.find((_, i) => resultsNow[i] == null)
+        const missingIdx = resultsNow.findIndex(r => r == null)
+        const missingPk = PLAYER_KEYS[missingIdx]
         const sum3 = resultsNow.reduce((s, r) => s + (r ?? 0), 0)
         const autoVal = cards - sum3
         if (autoVal >= 0 && autoVal <= cards) {
@@ -201,48 +214,87 @@ export default function ScoresheetScreen() {
             [`points/${missingPk}`]: autoPts,
             [`autoResult/${missingPk}`]: true,
           })
-          // 4th result auto-filled — jump straight to next hand
           setInputVal('')
           setForbiddenWarn(false)
           setExceedsErr(null)
+          setAutoFillErr(null)
           const nextHi = hi + 1
           if (nextHi < handSeq.length) {
-            setActiveCell({ hand: nextHi, type: 'bid', player: 0 })
+            const firstBidder = nextHi % 4
+            setActiveCell({ hand: nextHi, type: 'bid', player: firstBidder })
             await updateCurrentHand(code, nextHi)
           } else {
             setActiveCell(null)
           }
           return
         } else {
-          // Would be negative — data entry error; show inline message
           setAutoFillErr(hi)
+          return
         }
       }
     }
 
-    advanceCell(hi, type, pi)
+    // Compute next empty cell locally (optimistic — Firebase hasn't updated yet)
+    const updatedH = type === 'bid'
+      ? { ...h, bids: { ...(h?.bids ?? {}), [pk]: num } }
+      : { ...h, results: { ...(h?.results ?? {}), [pk]: num } }
+    const localHands = { ...hands, [hi]: updatedH }
+    const nextCell = getNextEmptyCell(localHands, handSeq)
+
     setInputVal('')
     setForbiddenWarn(false)
     setExceedsErr(null)
-  }, [activeCell, inputVal, hands, handSeq, histType, histValue, histValueShort, histValueLong, code, advanceCell])
+    setAutoFillErr(null)
 
-  // Single-digit entry — always replaces (max cards = 9 so one digit is always enough)
+    if (nextCell) {
+      setActiveCell(nextCell)
+      if (nextCell.hand !== hi) await updateCurrentHand(code, nextCell.hand)
+    } else {
+      setActiveCell(null)
+    }
+  }, [hands, handSeq, code, resolveHist])
+
+  // Single-digit entry — bids auto-confirm on digit; results wait for explicit confirm
   const appendDigit = useCallback((digit) => {
-    if (!activeCell) return
+    if (!activeCell || !canEdit) return
     setAutoFillErr(null)
     setExceedsErr(null)
     const maxAllowed = handSeq[activeCell.hand]
     const n = parseInt(digit)
     if (isNaN(n) || n > maxAllowed) return
     setInputVal(digit)
+
     if (activeCell.type === 'bid') {
       const h = hands[activeCell.hand] ?? {}
       const allBids = PLAYER_KEYS.map((pk, i) => i === activeCell.player ? n : (h?.bids?.[pk] ?? null))
-      setForbiddenWarn(allBids.every(b => b != null) && isForbiddenBid(allBids, activeCell.player, maxAllowed))
+      const forbidden = allBids.every(b => b != null) && isForbiddenBid(allBids, activeCell.player, maxAllowed)
+      setForbiddenWarn(forbidden)
+      if (!forbidden) {
+        doSaveCell(activeCell.hand, activeCell.type, activeCell.player, n)
+      }
     } else {
       setForbiddenWarn(false)
     }
-  }, [activeCell, handSeq, hands])
+  }, [activeCell, canEdit, handSeq, hands, doSaveCell])
+
+  const confirmCell = useCallback(async (explicitVal) => {
+    if (!activeCell || !canEdit) return
+    const valueStr = explicitVal !== undefined ? String(explicitVal) : inputVal
+    if (valueStr === '') return
+    const num = parseInt(valueStr)
+    if (isNaN(num)) { setActiveCell(null); setInputVal(''); return }
+
+    if (activeCell.type === 'bid') {
+      const h = hands[activeCell.hand] ?? {}
+      const cards = handSeq[activeCell.hand]
+      const allBids = PLAYER_KEYS.map((pk, i) => i === activeCell.player ? num : (h?.bids?.[pk] ?? null))
+      if (allBids.every(b => b != null) && isForbiddenBid(allBids, activeCell.player, cards)) {
+        setForbiddenWarn(true)
+        return
+      }
+    }
+    await doSaveCell(activeCell.hand, activeCell.type, activeCell.player, num)
+  }, [activeCell, canEdit, inputVal, hands, handSeq, doSaveCell])
 
   const handleHiddenKeyDown = useCallback((e) => {
     if (!activeCell) return
@@ -257,7 +309,8 @@ export default function ScoresheetScreen() {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); confirmCell(); return }
     if (e.key === 'Escape') {
       e.preventDefault()
-      setActiveCell(null); setInputVal(''); setForbiddenWarn(false); setAutoFillErr(null); setExceedsErr(null)
+      setActiveCell(null); setInputVal(''); setForbiddenWarn(false)
+      setAutoFillErr(null); setExceedsErr(null)
     }
   }, [activeCell, appendDigit, confirmCell])
 
@@ -270,10 +323,18 @@ export default function ScoresheetScreen() {
 
   const handleCellTap = useCallback((hi, type, pi) => {
     if (!canEdit) return
-    if (inputMode === 'each' && PLAYER_KEYS[pi] !== mySlot) return
     const pk = PLAYER_KEYS[pi]
     const h = hands[hi] ?? {}
     if (type === 'result' && h?.bids?.[pk] == null) return
+
+    // Block future empty cells — enforce sequential filling
+    const nextEmpty = getNextEmptyCell(hands, handSeq)
+    if (nextEmpty) {
+      const nextIdx = getCellSeqIdx(nextEmpty.hand, nextEmpty.type, nextEmpty.player)
+      const thisIdx = getCellSeqIdx(hi, type, pi)
+      if (thisIdx > nextIdx) return
+    }
+
     const existing = type === 'bid' ? h?.bids?.[pk] : h?.results?.[pk]
     setActiveCell({ hand: hi, type, player: pi })
     setInputVal(existing != null ? String(existing) : '')
@@ -281,12 +342,12 @@ export default function ScoresheetScreen() {
     setAutoFillErr(null)
     setExceedsErr(null)
     if (!mobile) hiddenInputRef.current?.focus()
-  }, [canEdit, inputMode, mySlot, hands, mobile])
+  }, [canEdit, hands, handSeq, mobile])
 
-  // ── Conditional returns (AFTER all hooks) ──────────────────────────
+  // ── Conditional returns (after all hooks) ──────────────────────────
   if (!room) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ color: 'var(--text-secondary)' }}>…</p>
       </div>
     )
@@ -294,13 +355,9 @@ export default function ScoresheetScreen() {
   if (showRotate) return <RotatePrompt />
 
   // ── Visual helpers ─────────────────────────────────────────────────
-
-  // Blue = exact bid (bid === result > 0) OR pass success (bid=0, result=0)
-  // Orange = wrong bid, hist penalty, pass-but-won-tricks
   const isBlueResult = (bid, result) => {
     if (bid == null || result == null) return false
-    if (bid === 0) return result === 0
-    return bid === result
+    return bid === 0 ? result === 0 : bid === result
   }
   const ptColor = (bid, result, pts) => {
     if (pts == null) return 'var(--text-secondary)'
@@ -308,20 +365,18 @@ export default function ScoresheetScreen() {
     if (!isBlueResult(bid, result)) return 'var(--orange)'
     return 'var(--blue)'
   }
-
-  // Column header background — only in header, never bleeds into score rows
   const colHeaderBg = (pi) => {
     if (!isCouples) return 'transparent'
     return (pi === 0 || pi === 2) ? 'rgba(124,58,237,0.08)' : 'rgba(13,148,136,0.08)'
   }
-  // Avatar circle color
   const avatarColor = (pi) => {
-    if (!isCouples) return 'var(--surface-light)'
+    if (!isCouples) return 'var(--blue)'
     return (pi === 0 || pi === 2) ? TEAM_A : TEAM_B
   }
 
-  // ── Table ──────────────────────────────────────────────────────────
-  const NUM_COLS = 5   // Cards | P1 | P2 | P3 | P4
+  const NUM_COLS = 5
+  const nextEmpty = getNextEmptyCell(hands, handSeq)
+  const nextEmptyIdx = nextEmpty ? getCellSeqIdx(nextEmpty.hand, nextEmpty.type, nextEmpty.player) : -1
 
   const renderTable = () => (
     <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -335,20 +390,34 @@ export default function ScoresheetScreen() {
           <th style={TH}>🃏</th>
           {PLAYER_KEYS.map((pk, pi) => {
             const name = playerNames[pi]
+            const isDealer = !isReadOnly && pi === dealerForCurrentHand
             return (
-              <th key={pk} style={{ ...TH, background: colHeaderBg(pi), padding: '14px 6px 10px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <div style={{
-                    width: mobile ? 26 : 32, height: mobile ? 26 : 32, borderRadius: '50%',
-                    background: avatarColor(pi),
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: mobile ? 10 : 13, fontWeight: 700, color: '#fff', flexShrink: 0,
-                  }}>
-                    {(name[0] || '?').toUpperCase()}
+              <th key={pk} style={{ ...TH, background: colHeaderBg(pi), padding: '10px 6px 8px', position: 'relative' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{ position: 'relative' }}>
+                    <div style={{
+                      width: mobile ? 26 : 30, height: mobile ? 26 : 30, borderRadius: '50%',
+                      background: avatarColor(pi),
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: mobile ? 10 : 12, fontWeight: 700, color: '#fff', flexShrink: 0,
+                    }}>
+                      {(name[0] || '?').toUpperCase()}
+                    </div>
+                    {isDealer && (
+                      <span style={{
+                        position: 'absolute', top: -4, right: -8,
+                        fontSize: 9, fontWeight: 800, color: '#f59e0b',
+                        background: 'rgba(245,158,11,0.18)', borderRadius: 4,
+                        padding: '1px 3px', lineHeight: 1.2,
+                      }}>
+                        ▶
+                      </span>
+                    )}
                   </div>
                   <span style={{
-                    fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: mobile ? 10 : 13,
-                    color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis',
+                    fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+                    fontSize: mobile ? 9 : 12, color: 'var(--text-primary)',
+                    overflow: 'hidden', textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap', maxWidth: '100%', display: 'block',
                   }}>
                     {name}
@@ -378,7 +447,7 @@ export default function ScoresheetScreen() {
               {isSetStart && (
                 <tr style={{ background: 'var(--surface-deep)' }}>
                   <td colSpan={NUM_COLS} style={{
-                    padding: '5px 12px', fontSize: 11, fontWeight: 700,
+                    padding: '4px 10px', fontSize: 10, fontWeight: 700,
                     color: 'var(--blue)', letterSpacing: '1.2px', textTransform: 'uppercase',
                     fontFamily: 'Outfit, sans-serif',
                     borderTop: hi > 0 ? '2px solid var(--blue)' : 'none',
@@ -389,11 +458,7 @@ export default function ScoresheetScreen() {
                 </tr>
               )}
 
-              <tr
-                style={{ background: isEven ? 'var(--surface)' : 'var(--surface-alt)' }}
-                onMouseEnter={e => { if (!mobile) e.currentTarget.style.background = '#333352' }}
-                onMouseLeave={e => { if (!mobile) e.currentTarget.style.background = isEven ? 'var(--surface)' : 'var(--surface-alt)' }}
-              >
+              <tr style={{ background: isEven ? 'var(--surface)' : 'var(--surface-alt)' }}>
                 <td style={CARDS_CELL}>{cards}</td>
 
                 {PLAYER_KEYS.map((pk, pi) => {
@@ -404,6 +469,11 @@ export default function ScoresheetScreen() {
                   const isBidActive = isBidRowActive && activeCell?.player === pi
                   const isResActive = isResRowActive && activeCell?.player === pi
                   const bidForbidden = isBidActive && forbiddenWarn
+
+                  const bidSeqIdx = getCellSeqIdx(hi, 'bid', pi)
+                  const resSeqIdx = getCellSeqIdx(hi, 'result', pi)
+                  const isFutureBid = bid == null && canEdit && nextEmptyIdx >= 0 && bidSeqIdx > nextEmptyIdx
+                  const isFutureRes = result == null && canEdit && nextEmptyIdx >= 0 && resSeqIdx > nextEmptyIdx
 
                   const bidDisplay = isBidActive
                     ? (inputVal !== '' ? inputVal : (bid != null ? (bid === 0 ? '-' : String(bid)) : '·'))
@@ -423,23 +493,24 @@ export default function ScoresheetScreen() {
                     <td key={pk} style={{ borderLeft: '1px solid var(--border)', padding: 0 }}>
                       <div style={{ display: 'flex', height: ROW_H, alignItems: 'stretch' }}>
 
-                        {/* Bid sub-cell — orange border when bid would be forbidden */}
+                        {/* Bid sub-cell */}
                         <div
                           onClick={() => handleCellTap(hi, 'bid', pi)}
                           style={{
-                            width: mobile ? 28 : 40, flexShrink: 0,
+                            width: mobile ? 26 : 38, flexShrink: 0,
                             borderRight: '1px solid var(--border)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: mobile ? 11 : 13,
                             color: isBidActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                            cursor: canEdit ? 'pointer' : 'default',
+                            cursor: isFutureBid ? 'not-allowed' : (canEdit ? 'pointer' : 'default'),
+                            opacity: isFutureBid ? 0.28 : 1,
                             background: isBidActive
                               ? (bidForbidden ? 'rgba(212,80,10,0.13)' : 'rgba(37,99,235,0.13)')
                               : 'transparent',
                             boxShadow: isBidActive
                               ? (bidForbidden ? 'inset 0 0 0 2px var(--orange)' : 'inset 0 0 0 2px var(--blue)')
                               : 'none',
-                            transition: 'background var(--transition), box-shadow var(--transition)',
+                            transition: 'all 120ms ease',
                             fontVariantNumeric: 'tabular-nums',
                             fontFamily: 'Inter, sans-serif',
                             userSelect: 'none', WebkitUserSelect: 'none',
@@ -448,7 +519,7 @@ export default function ScoresheetScreen() {
                           {bidDisplay}
                         </div>
 
-                        {/* Points sub-cell — italic + muted when auto-filled; x2/strikethrough for Premium */}
+                        {/* Points sub-cell */}
                         <div
                           onClick={() => handleCellTap(hi, 'result', pi)}
                           style={{
@@ -457,13 +528,14 @@ export default function ScoresheetScreen() {
                             fontSize: mobile ? 12 : 14,
                             fontWeight: pts != null || isResActive ? 600 : 400,
                             fontStyle: isAutoFilled && !isResActive ? 'italic' : 'normal',
-                            opacity: cellMark === 'penalty' ? 0.55 : (isAutoFilled && !isResActive ? 0.6 : 1),
-                            color: isResActive ? 'var(--text-primary)' : (cellMark === 'penalty' ? 'var(--text-secondary)' : ptColor(bid, result, pts)),
+                            opacity: isFutureRes ? 0.28 : (cellMark === 'penalty' ? 0.55 : (isAutoFilled && !isResActive ? 0.6 : 1)),
+                            color: isResActive ? 'var(--text-primary)'
+                              : (cellMark === 'penalty' ? 'var(--text-secondary)' : ptColor(bid, result, pts)),
                             textDecoration: cellMark === 'penalty' ? 'line-through' : 'none',
-                            cursor: bid != null && canEdit ? 'pointer' : 'default',
+                            cursor: isFutureRes ? 'not-allowed' : (bid != null && canEdit ? 'pointer' : 'default'),
                             background: isResActive ? 'rgba(37,99,235,0.13)' : 'transparent',
                             boxShadow: isResActive ? 'inset 0 0 0 2px var(--blue)' : 'none',
-                            transition: 'background var(--transition), box-shadow var(--transition)',
+                            transition: 'all 120ms ease',
                             fontVariantNumeric: 'tabular-nums',
                             fontFamily: 'Inter, sans-serif',
                             userSelect: 'none', WebkitUserSelect: 'none',
@@ -486,43 +558,40 @@ export default function ScoresheetScreen() {
                 })}
               </tr>
 
-              {/* Forbidden bid error — shown inline below the hand row */}
               {forbiddenWarn && isBidRowActive && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
                   <td colSpan={NUM_COLS} style={{
-                    padding: '5px 14px', fontSize: 12, color: 'var(--orange)',
+                    padding: '4px 10px', fontSize: 11, color: 'var(--orange)',
                     fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)',
                   }}>
-                    ⚠ Cannot bid {inputVal} — total bids cannot equal {cards} (cards in play)
+                    ⚠ {t('forbidden_bid')} — {inputVal !== '' ? `bid ${inputVal}` : ''} would make total equal {cards}
                   </td>
                 </tr>
               )}
 
-              {/* Exceeds-cards error — new result would push the hand total above cards in play */}
               {exceedsErr === hi && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
                   <td colSpan={NUM_COLS} style={{
-                    padding: '5px 14px', fontSize: 12, color: 'var(--orange)',
+                    padding: '4px 10px', fontSize: 11, color: 'var(--orange)',
                     fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)',
                   }}>
-                    ⚠ Total tricks cannot exceed {cards} for this hand
+                    ⚠ Total tricks cannot exceed {cards}
                   </td>
                 </tr>
               )}
 
-              {/* Auto-fill error — shown when computed 4th result would be negative */}
               {autoFillErr === hi && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
                   <td colSpan={NUM_COLS} style={{
-                    padding: '5px 14px', fontSize: 12, color: 'var(--orange)',
+                    padding: '4px 10px', fontSize: 11, color: 'var(--orange)',
                     fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)',
                   }}>
-                    ⚠ Results don't add up — please check previous entries
+                    ⚠ Results don't add up — check previous entries
                   </td>
                 </tr>
               )}
 
-              {/* Set total row — T1/T2/T3/T4 (points ÷ 100, Premium adjustments applied) */}
+              {/* Set total row + optional team total row */}
               {isSetEnd && (() => {
                 const setTotals = PLAYER_KEYS.map((_, pi) => {
                   const raw = handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)
@@ -530,38 +599,60 @@ export default function ScoresheetScreen() {
                   const penalty = bonusData?.penalties?.[pi] ?? 0
                   return raw + bonus - penalty
                 })
+                const teamA = setTotals[0] + setTotals[2]
+                const teamB = setTotals[1] + setTotals[3]
                 return (
-                  <tr style={{ background: 'var(--surface-total)', borderTop: '1px solid var(--border-strong)', borderBottom: '1px solid var(--border-strong)' }}>
-                    <td style={{
-                      padding: '8px 10px', fontSize: 11, fontWeight: 700,
-                      color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif',
-                      textTransform: 'uppercase', letterSpacing: '0.5px',
-                    }}>
-                      T{setIdx + 1}
-                    </td>
-                    {PLAYER_KEYS.map((_, pi) => (
-                      <td key={pi} style={{
-                        textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
-                        fontSize: 14, color: 'var(--blue)', borderLeft: '1px solid var(--border)',
-                        fontVariantNumeric: 'tabular-nums',
+                  <>
+                    <tr style={{ background: 'var(--surface-total)', borderTop: '1px solid var(--border-strong)', borderBottom: '1px solid var(--border-strong)' }}>
+                      <td style={{
+                        padding: '7px 8px', fontSize: 10, fontWeight: 700,
+                        color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif',
+                        textTransform: 'uppercase', letterSpacing: '0.5px',
                       }}>
-                        {(setTotals[pi] / 100).toFixed(1)}
+                        T{setIdx + 1}
                       </td>
-                    ))}
-                  </tr>
+                      {PLAYER_KEYS.map((_, pi) => (
+                        <td key={pi} style={{
+                          textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+                          fontSize: 14, color: 'var(--blue)', borderLeft: '1px solid var(--border)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {(setTotals[pi] / 100).toFixed(1)}
+                        </td>
+                      ))}
+                    </tr>
+                    {isCouples && (
+                      <tr style={{ background: '#16162a', borderBottom: '2px solid var(--blue)' }}>
+                        <td style={{ padding: '5px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>
+                          ▶
+                        </td>
+                        <td colSpan={2} style={{
+                          textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+                          fontSize: 13, color: TEAM_A, borderLeft: '1px solid var(--border)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {(teamA / 100).toFixed(1)}
+                        </td>
+                        <td colSpan={2} style={{
+                          textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+                          fontSize: 13, color: TEAM_B, borderLeft: '1px solid var(--border)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {(teamB / 100).toFixed(1)}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )
               })()}
             </Fragment>
           )
         })}
 
-        {/* Grand total — sticky footer, always shows running sum */}
-        <tr style={{
-          background: '#1a1a2e', borderTop: '2px solid var(--border-strong)',
-          position: 'sticky', bottom: 0, zIndex: 1,
-        }}>
+        {/* Grand total row */}
+        <tr style={{ background: '#1a1a2e', borderTop: '2px solid var(--border-strong)', position: 'sticky', bottom: 0, zIndex: 1 }}>
           <td style={{
-            padding: '12px 10px', fontSize: 12, fontWeight: 700,
+            padding: '10px 8px', fontSize: 11, fontWeight: 700,
             color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif',
             textTransform: 'uppercase', letterSpacing: '0.5px',
           }}>
@@ -577,19 +668,41 @@ export default function ScoresheetScreen() {
             </td>
           ))}
         </tr>
+
+        {/* Grand team total row (couples only) */}
+        {isCouples && (
+          <tr style={{ background: '#121222', borderTop: '1px solid var(--border)' }}>
+            <td style={{ padding: '7px 6px', fontSize: 9, color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 700 }}>
+              ▶▶
+            </td>
+            <td colSpan={2} style={{
+              textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+              fontSize: 15, color: TEAM_A, borderLeft: '1px solid var(--border)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              {((grandTotals[0] + grandTotals[2]) / 100).toFixed(1)}
+            </td>
+            <td colSpan={2} style={{
+              textAlign: 'center', fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+              fontSize: 15, color: TEAM_B, borderLeft: '1px solid var(--border)',
+              fontVariantNumeric: 'tabular-nums',
+            }}>
+              {((grandTotals[1] + grandTotals[3]) / 100).toFixed(1)}
+            </td>
+          </tr>
+        )}
       </tbody>
     </table>
   )
 
-  // ── Shared UI pieces ───────────────────────────────────────────────
   const topBar = (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
-      padding: mobile ? '8px 12px' : '10px 24px',
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: mobile ? '8px 10px' : '10px 24px',
       background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexShrink: 0,
     }}>
       <button
-        onClick={() => setShowLeaveModal(true)}
+        onClick={() => isReadOnly ? navigate(`/room/${code}/results`) : setShowLeaveModal(true)}
         style={{ background: 'none', color: 'var(--text-secondary)', fontSize: 18, padding: '4px 6px', lineHeight: 1 }}
       >
         ←
@@ -602,15 +715,24 @@ export default function ScoresheetScreen() {
       </span>
       <span style={{
         background: 'rgba(37,99,235,0.15)', color: 'var(--blue)', borderRadius: 6,
-        padding: '2px 8px', fontSize: 11, fontFamily: 'Outfit, sans-serif',
+        padding: '2px 8px', fontSize: 10, fontFamily: 'Outfit, sans-serif',
         fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
       }}>
         {gameMode === 'classic' ? t('mode_classic') : t('mode_9cards')}
       </span>
+      {isReadOnly && (
+        <span style={{
+          marginLeft: 'auto',
+          background: 'rgba(245,158,11,0.15)', color: '#f59e0b', borderRadius: 6,
+          padding: '2px 8px', fontSize: 10, fontFamily: 'Outfit, sans-serif',
+          fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px',
+        }}>
+          {t('view_only')}
+        </span>
+      )}
     </div>
   )
 
-  // Hidden input — sole keyboard capture point, never visible
   const hiddenInput = (
     <input
       ref={hiddenInputRef}
@@ -619,13 +741,11 @@ export default function ScoresheetScreen() {
       autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
       onKeyDown={handleHiddenKeyDown}
       style={{
-        position: 'fixed', top: 0, left: 0,
-        width: 1, height: 1, opacity: 0,
+        position: 'fixed', top: 0, left: 0, width: 1, height: 1, opacity: 0,
         border: 'none', padding: 0, margin: 0, outline: 'none',
         pointerEvents: 'none', fontSize: 16,
       }}
-      aria-hidden="true"
-      tabIndex={-1}
+      aria-hidden="true" tabIndex={-1}
     />
   )
 
@@ -640,39 +760,51 @@ export default function ScoresheetScreen() {
     />
   )
 
-  // ── Layouts ────────────────────────────────────────────────────────
-
   if (mobile) {
     return (
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg)' }}>
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {hiddenInput}
         {topBar}
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <div style={{ flex: '0 0 75%', overflowY: 'auto', overflowX: 'hidden' }}>
+          <div style={{ flex: '0 0 76%', overflowY: 'auto', overflowX: 'hidden' }}>
             {renderTable()}
           </div>
-          <div style={{ flex: '0 0 25%', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-            <CustomKeyboard onKey={handleKey} value={inputVal} maxVal={activeCell ? handSeq[activeCell.hand] : undefined} />
-          </div>
+          {!isReadOnly && !isSpectator && (
+            <div style={{ flex: '0 0 24%', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+              <CustomKeyboard
+                onKey={handleKey}
+                value={inputVal}
+                maxVal={activeCell ? handSeq[activeCell.hand] : undefined}
+              />
+            </div>
+          )}
         </div>
-        {setBonus && <SetSummaryCard bonus={setBonus} playerNames={playerNames} onClose={() => setSetBonus(null)} />}
+        {setBonus && (
+          <SetSummaryCard
+            bonus={setBonus} playerNames={playerNames}
+            isCouples={isCouples} onClose={() => setSetBonus(null)}
+          />
+        )}
         {leaveModal}
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div style={{ minHeight: '100vh' }}>
       {hiddenInput}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20 }}>
-        {topBar}
-      </div>
+      <div style={{ position: 'sticky', top: 0, zIndex: 20 }}>{topBar}</div>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '28px 24px 80px' }}>
         <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-card)', border: '1px solid var(--border)', overflow: 'hidden' }}>
           {renderTable()}
         </div>
       </div>
-      {setBonus && <SetSummaryCard bonus={setBonus} playerNames={playerNames} onClose={() => setSetBonus(null)} />}
+      {setBonus && (
+        <SetSummaryCard
+          bonus={setBonus} playerNames={playerNames}
+          isCouples={isCouples} onClose={() => setSetBonus(null)}
+        />
+      )}
       {leaveModal}
     </div>
   )

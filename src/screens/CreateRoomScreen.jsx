@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { generateRoomCode, createRoom, updatePlayerNames } from '../firebase/roomService'
+import { generateRoomCode, createRoom } from '../firebase/roomService'
 import LanguageToggle from '../components/LanguageToggle'
 
-const STEPS = ['game_mode', 'player_mode', 'hist', 'input_mode', 'players']
+const STEPS = ['game_mode', 'player_mode', 'hist', 'input_mode', 'players', 'choose_me']
 
-// Hist values: 100–1500 in steps of 100
 function isValidHist(s) {
-  if (s === '' || s == null) return true  // empty → will use default
+  if (s === '' || s == null) return true
   const n = parseInt(s)
   return !isNaN(n) && n >= 100 && n <= 1500 && n % 100 === 0
 }
@@ -82,9 +81,8 @@ export default function CreateRoomScreen() {
     inputMode: 'single',
   })
   const [names, setNames] = useState(['', '', '', ''])
+  const [creatorIdx, setCreatorIdx] = useState(0)
 
-  // Local string states for hist number inputs — lets user type freely,
-  // separate from the validated number in settings
   const [histValStr, setHistValStr] = useState('200')
   const [histShortStr, setHistShortStr] = useState('200')
   const [histLongStr, setHistLongStr] = useState('500')
@@ -93,7 +91,6 @@ export default function CreateRoomScreen() {
     generateRoomCode().then(code => { setRoomCode(code); setLoading(false) })
   }, [])
 
-  // If game mode changes to 9cards, 'mix' is not valid — reset to 'custom'
   useEffect(() => {
     if (settings.gameMode !== 'classic' && settings.histType === 'mix') {
       setSettings(s => ({ ...s, histType: 'custom' }))
@@ -101,6 +98,7 @@ export default function CreateRoomScreen() {
   }, [settings.gameMode, settings.histType])
 
   const set = (key, val) => setSettings(s => ({ ...s, [key]: val }))
+  const isCouples = settings.playerMode === 'couples'
 
   const histValErr = !isValidHist(histValStr) && histValStr !== ''
   const histShortErr = !isValidHist(histShortStr) && histShortStr !== ''
@@ -110,18 +108,16 @@ export default function CreateRoomScreen() {
     if (step === 2) {
       if (settings.histType === 'custom') return !histValErr
       if (settings.histType === 'mix') return !histShortErr && !histLongErr
-      return true  // 'special'
+      return true
     }
     if (step === 4) return names.every(n => n.trim().length > 0)
     return true
   }
 
-  // Commit hist string values to settings before advancing from step 2
   const handleNext = () => {
     if (step === 2) {
-      if (settings.histType === 'custom') {
-        set('histValue', parseInt(histValStr) || 200)
-      } else if (settings.histType === 'mix') {
+      if (settings.histType === 'custom') set('histValue', parseInt(histValStr) || 200)
+      else if (settings.histType === 'mix') {
         set('histValueShort', parseInt(histShortStr) || 200)
         set('histValueLong', parseInt(histLongStr) || 500)
       }
@@ -134,11 +130,10 @@ export default function CreateRoomScreen() {
     setCreating(true)
     setError('')
     try {
-      await createRoom(roomCode, settings, names[0])
+      await createRoom(roomCode, settings, names, creatorIdx)
+      const creatorSlot = `p${creatorIdx + 1}`
       sessionStorage.setItem('joker_room', roomCode)
-      sessionStorage.setItem('joker_slot', 'p1')
-      sessionStorage.setItem('joker_names', JSON.stringify(names))
-      await updatePlayerNames(roomCode, names)
+      sessionStorage.setItem('joker_slot', creatorSlot)
       navigate(`/room/${roomCode}/waiting`)
     } catch (e) {
       setError(e.message)
@@ -175,57 +170,27 @@ export default function CreateRoomScreen() {
               title={t('hist_custom')} desc={t('hist_custom_desc')} />
             <OptionCard selected={settings.histType === 'special'} onClick={() => set('histType', 'special')}
               title={t('hist_special')} desc={t('hist_special_desc')} />
-            {/* Mix only available in Classic mode */}
             {settings.gameMode === 'classic' && (
               <OptionCard selected={settings.histType === 'mix'} onClick={() => set('histType', 'mix')}
                 title={t('hist_mix')} desc={t('hist_mix_desc')} />
             )}
-
-            {/* Fixed penalty amount input */}
             {settings.histType === 'custom' && (
               <div style={{ marginTop: 4 }}>
-                <HistInput
-                  label={t('hist_value_label')}
-                  value={histValStr}
-                  onChange={v => {
-                    setHistValStr(v)
-                    if (isValidHist(v)) set('histValue', parseInt(v) || 200)
-                  }}
-                  error={histValErr}
-                  t={t}
-                />
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 5 }}>
-                  {t('hist_value_hint')}
-                </p>
+                <HistInput label={t('hist_value_label')} value={histValStr}
+                  onChange={v => { setHistValStr(v); if (isValidHist(v)) set('histValue', parseInt(v) || 200) }}
+                  error={histValErr} t={t} />
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 5 }}>{t('hist_value_hint')}</p>
               </div>
             )}
-
-            {/* Mix: two inputs for short and long hands */}
             {settings.histType === 'mix' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 4 }}>
-                <HistInput
-                  label={t('hist_short_label')}
-                  value={histShortStr}
-                  onChange={v => {
-                    setHistShortStr(v)
-                    if (isValidHist(v)) set('histValueShort', parseInt(v) || 200)
-                  }}
-                  error={histShortErr}
-                  t={t}
-                />
-                <HistInput
-                  label={t('hist_long_label')}
-                  value={histLongStr}
-                  onChange={v => {
-                    setHistLongStr(v)
-                    if (isValidHist(v)) set('histValueLong', parseInt(v) || 500)
-                  }}
-                  error={histLongErr}
-                  t={t}
-                />
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                  {t('hist_value_hint')}
-                </p>
+                <HistInput label={t('hist_short_label')} value={histShortStr}
+                  onChange={v => { setHistShortStr(v); if (isValidHist(v)) set('histValueShort', parseInt(v) || 200) }}
+                  error={histShortErr} t={t} />
+                <HistInput label={t('hist_long_label')} value={histLongStr}
+                  onChange={v => { setHistLongStr(v); if (isValidHist(v)) set('histValueLong', parseInt(v) || 500) }}
+                  error={histLongErr} t={t} />
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('hist_value_hint')}</p>
               </div>
             )}
           </div>
@@ -246,7 +211,7 @@ export default function CreateRoomScreen() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {names.map((name, i) => (
               <div key={i}>
-                {settings.playerMode === 'couples' && (
+                {isCouples && (
                   <div style={{
                     fontSize: 11, fontWeight: 700, letterSpacing: '0.8px',
                     color: (i === 0 || i === 2) ? '#7C3AED' : '#0D9488',
@@ -267,6 +232,26 @@ export default function CreateRoomScreen() {
           </div>
         )
 
+      case 5:
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {names.map((name, i) => {
+              const teamLabel = isCouples
+                ? ((i === 0 || i === 2) ? ` · ${t('team_a')}` : ` · ${t('team_b')}`)
+                : ` · Player ${i + 1}`
+              return (
+                <OptionCard
+                  key={i}
+                  selected={creatorIdx === i}
+                  onClick={() => setCreatorIdx(i)}
+                  title={name || t('player_name', { n: i + 1 })}
+                  desc={`Player ${i + 1}${teamLabel}`}
+                />
+              )
+            })}
+          </div>
+        )
+
       default:
         return null
     }
@@ -274,7 +259,7 @@ export default function CreateRoomScreen() {
 
   const stepTitles = [
     t('step_game_mode'), t('step_player_mode'), t('step_hist'),
-    t('step_input_mode'), t('step_players'),
+    t('step_input_mode'), t('step_players'), t('step_choose_player'),
   ]
 
   return (
@@ -306,7 +291,6 @@ export default function CreateRoomScreen() {
         </div>
       )}
 
-      {/* Progress dots */}
       <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginBottom: 24 }}>
         {STEPS.map((_, i) => (
           <div key={i} style={{
@@ -317,7 +301,6 @@ export default function CreateRoomScreen() {
         ))}
       </div>
 
-      {/* Step card */}
       <div style={{ background: 'var(--surface)', borderRadius: 'var(--radius-card)', padding: '24px 20px', marginBottom: 24 }}>
         <h2 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 18, marginBottom: 20 }}>
           {stepTitles[step]}

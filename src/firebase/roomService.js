@@ -1,5 +1,5 @@
 import { db } from './config'
-import { ref, set, get, update, onValue, off, serverTimestamp } from 'firebase/database'
+import { ref, set, get, update, push, onValue, off, serverTimestamp } from 'firebase/database'
 
 export async function generateRoomCode() {
   let code
@@ -13,33 +13,27 @@ export async function generateRoomCode() {
   throw new Error('Could not generate unique room code')
 }
 
-export async function createRoom(code, settings, creatorName) {
-  const roomRef = ref(db, `rooms/${code}`)
-  await set(roomRef, {
-    settings,
-    players: {
-      p1: { name: creatorName, isCreator: true },
-      p2: null,
-      p3: null,
-      p4: null,
-    },
-    hands: {},
-    currentHand: 0,
-    currentSet: 0,
-    status: 'waiting',
+// allNames: array of 4 names; creatorIdx: which index belongs to the creator
+export async function createRoom(code, settings, allNames, creatorIdx = 0) {
+  const players = {}
+  allNames.forEach((name, i) => {
+    players[`p${i + 1}`] = { name, isCreator: i === creatorIdx, claimed: i === creatorIdx }
+  })
+  await set(ref(db, `rooms/${code}`), {
+    settings, players, hands: {}, currentHand: 0, status: 'waiting',
     createdAt: serverTimestamp(),
   })
 }
 
-export async function joinRoom(code, playerName) {
-  const playersRef = ref(db, `rooms/${code}/players`)
-  const snap = await get(playersRef)
-  if (!snap.exists()) throw new Error('Room not found')
-  const players = snap.val()
-  const slot = ['p2', 'p3', 'p4'].find(k => !players[k])
-  if (!slot) throw new Error('Room is full')
-  await update(ref(db, `rooms/${code}/players/${slot}`), { name: playerName, isCreator: false })
-  return slot
+// Claim an unclaimed slot when joining
+export async function claimSlot(code, slot) {
+  await update(ref(db, `rooms/${code}/players/${slot}`), { claimed: true })
+}
+
+export async function joinAsSpectator(code) {
+  const specRef = push(ref(db, `rooms/${code}/spectators`))
+  await set(specRef, { joinedAt: serverTimestamp() })
+  return specRef.key
 }
 
 export async function getRoomOnce(code) {
@@ -64,12 +58,6 @@ export async function updateHand(code, handIndex, data) {
 
 export async function updateCurrentHand(code, handIndex) {
   await update(ref(db, `rooms/${code}`), { currentHand: handIndex })
-}
-
-export async function updatePlayerNames(code, names) {
-  const updates = {}
-  names.forEach((name, i) => { updates[`players/p${i + 1}/name`] = name })
-  await update(ref(db, `rooms/${code}`), updates)
 }
 
 export async function cancelRoom(code) {

@@ -3,8 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import confetti from 'canvas-confetti'
 import { useRoom } from '../hooks/useRoom'
-import { buildHandSequence } from '../utils/scoring'
-import { calcPoints } from '../utils/scoring'
+import { buildHandSequence, calcPoints } from '../utils/scoring'
 
 export default function ResultsScreen() {
   const { code } = useParams()
@@ -53,13 +52,12 @@ export default function ResultsScreen() {
 
   return (
     <div style={{ minHeight: '100vh', padding: 24, maxWidth: 480, margin: '0 auto' }}>
-      <div style={{ textAlign: 'center', marginBottom: 40 }}>
+      <div style={{ textAlign: 'center', marginBottom: 32 }}>
         <h1 style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 32, color: 'var(--blue)', marginBottom: 8 }}>
           {t('results_title')}
         </h1>
       </div>
 
-      {/* Winner highlight */}
       <div style={{
         background: 'var(--surface)', borderRadius: 'var(--radius-card)',
         padding: '24px', textAlign: 'center', marginBottom: 24,
@@ -75,8 +73,7 @@ export default function ResultsScreen() {
         </p>
       </div>
 
-      {/* Rankings */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 40 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 32 }}>
         {standings.slice(1).map((s, i) => (
           <div key={i} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -102,25 +99,24 @@ export default function ResultsScreen() {
         ))}
       </div>
 
-      {/* Actions */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <button
           onClick={() => navigate(`/room/${code}/game`)}
           style={{
-            height: 52, background: 'var(--blue)', color: '#fff',
-            borderRadius: 'var(--radius-btn)', fontSize: 17,
+            height: 52, background: 'var(--surface-light)', color: 'var(--text-primary)',
+            borderRadius: 'var(--radius-btn)', fontSize: 16,
             fontFamily: 'Outfit, sans-serif', fontWeight: 700,
+            border: '2px solid var(--border)',
           }}
         >
-          {t('play_again')}
+          {t('view_scoresheet')}
         </button>
         <button
           onClick={() => navigate('/')}
           style={{
-            height: 52, background: 'transparent', color: 'var(--text-primary)',
+            height: 52, background: 'var(--blue)', color: '#fff',
             borderRadius: 'var(--radius-btn)', fontSize: 17,
             fontFamily: 'Outfit, sans-serif', fontWeight: 700,
-            border: '2px solid var(--surface-light)',
           }}
         >
           {t('new_game')}
