@@ -73,57 +73,62 @@ export function isForbiddenBid(bids, playerIndex, cards) {
   return (othersSum + bids[playerIndex]) === cards
 }
 
-// Set bonus: find players with all exact bids in set
-export function calcSetBonus(handsInSet, playerCount, playerMode) {
+// Set bonus: find players with all exact bids in set.
+// activeKeys: ordered array of slot keys (e.g. ['p3','p1','p4','p2']) matching display order.
+// Indices in returned arrays correspond to positions in activeKeys.
+export function calcSetBonus(handsInSet, activeKeys, playerMode) {
+  const n = activeKeys.length
   const perfect = []
-  for (let p = 0; p < playerCount; p++) {
+  for (let pi = 0; pi < n; pi++) {
+    const pk = activeKeys[pi]
     const allExact = handsInSet.every(h => {
-      const bid = h?.bids?.[`p${p + 1}`]
-      const result = h?.results?.[`p${p + 1}`]
+      const bid = h?.bids?.[pk]
+      const result = h?.results?.[pk]
       return bid != null && result != null && (
         (bid > 0 && bid === result) ||
         (bid === 0 && result === 0)
       )
     })
-    if (allExact) perfect.push(p)
+    if (allExact) perfect.push(pi)
   }
   if (perfect.length === 0) return null
 
   // Find highest score AND its hand index per player (excluding last hand)
   const handsExcludingLast = handsInSet.slice(0, -1)
   const highestScores = []
-  const highestHandIdxs = []   // index within set (0-based), -1 if no positive score
-  for (let p = 0; p < playerCount; p++) {
-    const scores = handsExcludingLast.map(h => h?.points?.[`p${p + 1}`] ?? 0)
+  const highestHandIdxs = []
+  for (let pi = 0; pi < n; pi++) {
+    const pk = activeKeys[pi]
+    const scores = handsExcludingLast.map(h => h?.points?.[pk] ?? 0)
     const maxVal = scores.length > 0 ? Math.max(...scores, 0) : 0
     highestScores.push(maxVal)
     highestHandIdxs.push(maxVal > 0 ? scores.indexOf(maxVal) : -1)
   }
 
-  const bonuses = Array(playerCount).fill(0)
-  const penalties = Array(playerCount).fill(0)
+  const bonuses = Array(n).fill(0)
+  const penalties = Array(n).fill(0)
 
-  perfect.forEach(p => { bonuses[p] += highestScores[p] })
+  perfect.forEach(pi => { bonuses[pi] += highestScores[pi] })
 
-  // Each non-perfect player loses their highest score once, regardless of how many got Premium
   if (playerMode === 'individual') {
     if (perfect.length > 0) {
-      for (let p = 0; p < playerCount; p++) {
-        if (!perfect.includes(p)) penalties[p] = highestScores[p]
+      for (let pi = 0; pi < n; pi++) {
+        if (!perfect.includes(pi)) penalties[pi] = highestScores[pi]
       }
     }
   } else {
-    // Couples: p0&p2 = teamA, p1&p3 = teamB
-    const teamA = [0, 2], teamB = [1, 3]
-    const perfectTeamA = perfect.filter(p => teamA.includes(p))
-    const perfectTeamB = perfect.filter(p => teamB.includes(p))
+    // Couples: display positions 0&2 = Team A, 1&3 = Team B
+    const teamA = [0, 2].filter(i => i < n)
+    const teamB = [1, 3].filter(i => i < n)
+    const perfectTeamA = perfect.filter(pi => teamA.includes(pi))
+    const perfectTeamB = perfect.filter(pi => teamB.includes(pi))
     const allPerfectSameTeam =
       (perfectTeamA.length === perfect.length) ||
       (perfectTeamB.length === perfect.length)
 
     if (allPerfectSameTeam) {
       const losers = perfectTeamA.length === perfect.length ? teamB : teamA
-      losers.forEach(p => { penalties[p] = highestScores[p] })
+      losers.forEach(pi => { penalties[pi] = highestScores[pi] })
     }
   }
 

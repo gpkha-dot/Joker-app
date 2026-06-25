@@ -80,13 +80,14 @@ export default function ScoresheetScreen() {
   const handSeq = useMemo(() => buildHandSequence(gameMode), [gameMode])
   const setBounds = useMemo(() => getSetBoundaries(gameMode), [gameMode])
 
-  // Active player slots — determined by playerCount stored at game start, or fall back to claimed slots
+  // Active player slots in display order (set by host drag in waiting room)
   const activeKeys = useMemo(() => {
+    const order = Array.isArray(room?.displayOrder) ? room.displayOrder : ALL_KEYS
     const count = room?.playerCount
-    if (count && count > 0 && count <= 4) return ALL_KEYS.slice(0, count)
-    // Fallback: all claimed slots in order
-    return ALL_KEYS.filter(k => players[k]?.claimed === true)
-  }, [room?.playerCount, players])
+    const claimed = order.filter(k => players[k]?.claimed === true)
+    if (count && count > 0 && count <= 4) return claimed.slice(0, count)
+    return claimed
+  }, [room?.playerCount, room?.displayOrder, players])
 
   const n = activeKeys.length || 4
 
@@ -129,9 +130,9 @@ export default function ScoresheetScreen() {
       const handsInSet = Array.from({ length: b.end - b.start + 1 }, (_, i) => hands[b.start + i] ?? {})
       const complete = handsInSet.every(h => activeKeys.every(pk => h?.bids?.[pk] != null && h?.results?.[pk] != null))
       if (!complete) return null
-      return calcSetBonus(handsInSet, n, playerMode)
+      return calcSetBonus(handsInSet, activeKeys, playerMode)
     }),
-    [hands, setBounds, activeKeys, n, playerMode]
+    [hands, setBounds, activeKeys, playerMode]
   )
 
   const grandTotals = useMemo(() =>
@@ -167,7 +168,7 @@ export default function ScoresheetScreen() {
       if (!allDone) return
       setLastCompletedSet(si)
       const handsInSet = Array.from({ length: b.end - b.start + 1 }, (_, i) => hands[b.start + i] ?? {})
-      const bonus = calcSetBonus(handsInSet, n, playerMode)
+      const bonus = calcSetBonus(handsInSet, activeKeys, playerMode)
       if (bonus) {
         const setTotals = activeKeys.map((_, pi) => {
           const raw = handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)

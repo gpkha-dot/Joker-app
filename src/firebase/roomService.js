@@ -95,3 +95,7 @@ export async function cancelRoom(code) {
 export async function leaveRoom(code, slot) {
   await set(ref(db, `rooms/${code}/players/${slot}`), null)
 }
+
+export async function updatePlayerOrder(code, order) {
+  await update(ref(db, `rooms/${code}`), { displayOrder: order })
+}
