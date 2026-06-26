@@ -19,7 +19,7 @@ const ROW_H = 52
 const TEAM_A = '#7C3AED'
 const TEAM_B = '#0D9488'
 
-// Next unfilled cell following sequential game order (dealer rotation for bids, L→R for results)
+// Next unfilled cell following sequential game order (same dealer rotation for both bids and results)
 function getNextEmptyCell(handsData, handSeq, activeKeys) {
   const n = activeKeys.length
   for (let hi = 0; hi < handSeq.length; hi++) {
@@ -29,22 +29,21 @@ function getNextEmptyCell(handsData, handSeq, activeKeys) {
       const pi = (firstBidder + i) % n
       if (h?.bids?.[activeKeys[pi]] == null) return { hand: hi, type: 'bid', player: pi }
     }
-    for (let pi = 0; pi < n; pi++) {
+    for (let i = 0; i < n; i++) {
+      const pi = (firstBidder + i) % n
       if (h?.results?.[activeKeys[pi]] == null) return { hand: hi, type: 'result', player: pi }
     }
   }
   return null
 }
 
-// Monotonically increasing sequence index for a given cell
+// Monotonically increasing sequence index for a given cell (same rotation for bids and results)
 function getCellSeqIdx(hi, type, pi, n) {
   const cellsPerHand = n * 2
-  if (type === 'bid') {
-    const firstBidder = hi % n
-    const order = Array.from({ length: n }, (_, i) => (firstBidder + i) % n)
-    return hi * cellsPerHand + order.indexOf(pi)
-  }
-  return hi * cellsPerHand + n + pi
+  const firstBidder = hi % n
+  const order = Array.from({ length: n }, (_, i) => (firstBidder + i) % n)
+  if (type === 'bid') return hi * cellsPerHand + order.indexOf(pi)
+  return hi * cellsPerHand + n + order.indexOf(pi)
 }
 
 export default function ScoresheetScreen() {
