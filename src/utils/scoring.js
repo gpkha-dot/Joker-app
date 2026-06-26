@@ -40,7 +40,7 @@ export function getSetForHand(handIndex, gameMode) {
 }
 
 export function calcHistPenalty(histType, histValue, cards) {
-  if (histType === 'special') return cards * 25
+  if (histType === 'special') return cards * 100
   return histValue
 }
 
