@@ -373,6 +373,17 @@ export default function ScoresheetScreen() {
       if (thisIdx > nextIdx) return
     }
 
+    // Block the auto-filled result slot — it must never be manually edited
+    if (type === 'result') {
+      if (h?.autoResult?.[pk] === true) return
+      // Also block the last remaining empty result (it is about to be auto-filled)
+      const anyAutoFilled = activeKeys.some(k => h?.autoResult?.[k] === true)
+      if (!anyAutoFilled) {
+        const othersFilled = activeKeys.filter((_, i) => i !== pi && h?.results?.[activeKeys[i]] != null).length
+        if (othersFilled === n - 1) return
+      }
+    }
+
     const existing = type === 'bid' ? h?.bids?.[pk] : h?.results?.[pk]
     setActiveCell({ hand: hi, type, player: pi })
     setInputVal(existing != null ? String(existing) : '')
@@ -552,7 +563,7 @@ export default function ScoresheetScreen() {
                           color: isResActive ? 'var(--text-primary)'
                             : (cellMark === 'penalty' ? 'var(--text-secondary)' : ptColor(bid, result, pts)),
                           textDecoration: cellMark === 'penalty' ? 'line-through' : 'none',
-                          cursor: isFutureRes ? 'not-allowed' : (bid != null && canEdit ? 'pointer' : 'default'),
+                          cursor: isFutureRes ? 'not-allowed' : (isAutoFilled || !canEdit || bid == null ? 'default' : 'pointer'),
                           background: isResActive ? 'rgba(37,99,235,0.13)' : 'transparent',
                           boxShadow: isResActive ? 'inset 0 0 0 2px var(--blue)' : 'none',
                           transition: 'all 120ms ease',
@@ -583,7 +594,7 @@ export default function ScoresheetScreen() {
               {exceedsErr === hi && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
                   <td colSpan={1 + n} style={{ padding: '4px 10px', fontSize: 11, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)' }}>
-                    ⚠ Total tricks cannot exceed {cards}
+                    ⚠ Total exceeds cards in play — re-enter this value
                   </td>
                 </tr>
               )}
@@ -591,7 +602,7 @@ export default function ScoresheetScreen() {
               {autoFillErr === hi && (
                 <tr style={{ background: 'rgba(212,80,10,0.06)' }}>
                   <td colSpan={1 + n} style={{ padding: '4px 10px', fontSize: 11, color: 'var(--orange)', fontFamily: 'Inter, sans-serif', borderBottom: '1px solid rgba(212,80,10,0.18)' }}>
-                    ⚠ Results don't add up — check previous entries
+                    ⚠ Results exceed cards in play — check entries
                   </td>
                 </tr>
               )}
