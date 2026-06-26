@@ -144,6 +144,25 @@ export default function ScoresheetScreen() {
     [handPoints, setBonusData, activeKeys]
   )
 
+  // Cumulative per-player totals after each set (T1 = set1, T2 = set1+set2, …)
+  const cumulativeTotals = useMemo(() =>
+    setBounds.map((_, si) =>
+      activeKeys.map((__, pi) => {
+        let total = 0
+        for (let s = 0; s <= si; s++) {
+          const sb = setBounds[s]
+          const raw = handPoints
+            .slice(sb.start, sb.end + 1)
+            .reduce((sum, row) => sum + (row[pi] ?? 0), 0)
+          const bd = setBonusData[s]
+          total += raw + (bd?.bonuses?.[pi] ?? 0) - (bd?.penalties?.[pi] ?? 0)
+        }
+        return total
+      })
+    ),
+    [setBounds, handPoints, setBonusData, activeKeys]
+  )
+
   // One-time: set initial active cell to first empty when room first loads
   useEffect(() => {
     if (!room || initialized.current || isReadOnly || isSpectator || activeKeys.length === 0) return
@@ -208,15 +227,17 @@ export default function ScoresheetScreen() {
       const pts = calcPoints(bid, num, cards, ht, hv)
       await updateHand(code, hi, { [`results/${pk}`]: num, [`points/${pk}`]: pts, [`autoResult/${pk}`]: null })
 
-      // Auto-fill the last remaining result when n-1 are entered
+      // Auto-fill the last remaining result when n-1 are entered;
+      // or re-auto-fill the previously auto-filled slot when an edit makes sum ≠ cards.
       const resultsNow = activeKeys.map((k, i) => i === pi ? num : (h?.results?.[k] ?? null))
       const filledCnt = resultsNow.filter(r => r != null).length
+
       if (filledCnt === n - 1) {
         const missingIdx = resultsNow.findIndex(r => r == null)
         const missingPk = activeKeys[missingIdx]
         const sum = resultsNow.reduce((s, r) => s + (r ?? 0), 0)
         const autoVal = cards - sum
-        if (autoVal >= 0 && autoVal <= cards) {
+        if (autoVal >= 0) {
           const autoBid = h?.bids?.[missingPk] ?? 0
           const autoPts = calcPoints(autoBid, autoVal, cards, ht, hv)
           await updateHand(code, hi, {
@@ -238,6 +259,30 @@ export default function ScoresheetScreen() {
           setAutoFillErr(hi); return
         }
       }
+
+      if (filledCnt === n) {
+        // All results filled (editing a past result) — re-validate sum, adjust auto-filled slot
+        const sum = resultsNow.reduce((s, r) => s + (r ?? 0), 0)
+        if (sum !== cards) {
+          const autoIdx = activeKeys.findIndex((ak, i) => i !== pi && h?.autoResult?.[ak] === true)
+          if (autoIdx >= 0) {
+            const autoPk = activeKeys[autoIdx]
+            const prevAutoVal = resultsNow[autoIdx] ?? 0
+            const newAutoVal = cards - (sum - prevAutoVal)
+            if (newAutoVal >= 0) {
+              const autoBid = h?.bids?.[autoPk] ?? 0
+              const autoPts = calcPoints(autoBid, newAutoVal, cards, ht, hv)
+              await updateHand(code, hi, {
+                [`results/${autoPk}`]: newAutoVal,
+                [`points/${autoPk}`]: autoPts,
+                [`autoResult/${autoPk}`]: true,
+              })
+            } else {
+              setAutoFillErr(hi); return
+            }
+          }
+        }
+      }
     }
 
     // Optimistically compute next empty cell from local state
@@ -256,7 +301,7 @@ export default function ScoresheetScreen() {
     }
   }, [hands, handSeq, activeKeys, n, code, resolveHist])
 
-  // Bids: auto-save on digit entry. Results: wait for explicit confirm.
+  // Single digit typed → auto-save and advance for both bids and results
   const appendDigit = useCallback((digit) => {
     if (!activeCell || !canEdit) return
     setAutoFillErr(null); setExceedsErr(null)
@@ -273,6 +318,7 @@ export default function ScoresheetScreen() {
       if (!forbidden) doSaveCell(activeCell.hand, activeCell.type, activeCell.player, num)
     } else {
       setForbiddenWarn(false)
+      doSaveCell(activeCell.hand, activeCell.type, activeCell.player, num)
     }
   }, [activeCell, canEdit, handSeq, hands, activeKeys, doSaveCell])
 
@@ -395,7 +441,7 @@ export default function ScoresheetScreen() {
               }}>
                 <span style={{
                   fontFamily: 'Outfit, sans-serif', fontWeight: 700,
-                  fontSize: mobile ? 10 : 12,
+                  fontSize: mobile ? 13 : 15,
                   color: isDealer ? '#4ADE80' : 'var(--text-primary)',
                   overflow: 'hidden', textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap', maxWidth: '100%', display: 'block',
@@ -550,12 +596,9 @@ export default function ScoresheetScreen() {
                 </tr>
               )}
 
-              {/* Set total row + optional team total */}
+              {/* Set total row + optional team total (cumulative: T1=s1, T2=s1+s2, …) */}
               {isSetEnd && (() => {
-                const setTotals = activeKeys.map((_, pi) => {
-                  const raw = handPoints.slice(b.start, b.end + 1).reduce((s, row) => s + (row[pi] ?? 0), 0)
-                  return raw + (bonusData?.bonuses?.[pi] ?? 0) - (bonusData?.penalties?.[pi] ?? 0)
-                })
+                const setTotals = cumulativeTotals[setIdx]
                 const teamA = isCouples ? setTotals[0] + setTotals[2] : null
                 const teamB = isCouples ? setTotals[1] + setTotals[3] : null
                 return (

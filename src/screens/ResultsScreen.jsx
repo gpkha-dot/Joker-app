@@ -68,7 +68,7 @@ export default function ResultsScreen() {
         border: '2px solid var(--blue)',
       }}>
         <div style={{ fontSize: 40, marginBottom: 8 }}>🏆</div>
-        <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 22, color: 'var(--blue)' }}>
+        <p style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 700, fontSize: 25, color: 'var(--blue)' }}>
           {standings[0]?.label || standings[0]?.name}
         </p>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>{t('winner')}</p>
@@ -92,7 +92,7 @@ export default function ResultsScreen() {
               }}>
                 {i + 2}
               </span>
-              <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: 16 }}>
+              <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: 600, fontSize: 18 }}>
                 {s.label || s.name}
               </span>
             </div>

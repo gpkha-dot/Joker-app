@@ -200,10 +200,10 @@ export default function CreateRoomScreen() {
       case 'input_mode':
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <OptionCard selected={settings.inputMode === 'each'} onClick={() => setSetting('inputMode', 'each')}
-              title={t('input_each')} desc={t('input_each_desc')} />
             <OptionCard selected={settings.inputMode === 'single'} onClick={() => setSetting('inputMode', 'single')}
               title={t('input_single')} desc={t('input_single_desc')} />
+            <OptionCard selected={settings.inputMode === 'each'} onClick={() => setSetting('inputMode', 'each')}
+              title={t('input_each')} desc={t('input_each_desc')} />
           </div>
         )
 

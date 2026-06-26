@@ -74,7 +74,7 @@ function SortablePlayerCard({ slot, idx, player, claimed, canDrag, isCouples, al
       {/* Name + status (no avatar circle) */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          fontWeight: claimed ? 600 : 400, fontSize: 15,
+          fontWeight: claimed ? 600 : 400, fontSize: 17,
           fontFamily: 'Outfit, sans-serif',
           color: claimed ? 'var(--text-primary)' : 'var(--text-secondary)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3,
